@@ -1,4 +1,7 @@
-use crate::{Error, Input, Span};
+use crate::{
+    parsers::{CharParser, IntegerParser, StrParser, Ws},
+    Error, Input, Parser, Span,
+};
 
 #[test]
 fn test_char_parser() {
