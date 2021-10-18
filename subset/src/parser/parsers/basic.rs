@@ -34,7 +34,7 @@ impl<'s> Parser for StrParser<'s> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SpanParser<P: Fn(char) -> bool>(P);
+pub struct SpanParser<P: Fn(char) -> bool>(pub P);
 
 impl<P: Fn(char) -> bool> Parser for SpanParser<P> {
     type Output = Span;
@@ -63,33 +63,31 @@ impl Parser for Ws {
     }
 }
 
-// todo: remove, just for testing
 #[derive(Debug, Clone, Copy)]
-pub struct BoolParser;
-
-impl Parser for BoolParser {
-    type Output = bool;
-
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
-        (StrParser("true").map(|_| true).c() | StrParser("false").map(|_| false)).parse(input)
-    }
+pub struct IntegerParser {
+    pub base: u32,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct IntegerParser;
-
 impl Parser for IntegerParser {
-    type Output = u64;
+    // todo: bigger?
+    type Output = u128;
 
+    // todo: clean up?
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
-        // todo: different bases and suffixes indicating type e.g. 0b101010usize
-        SpanParser(|ch| ch.is_digit(10))
+        let digits = &"0123456789abcdef"[0..self.base as usize];
+        SpanParser(|ch| digits.contains(ch))
             .try_map(|span| {
-                input.s[span.0.clone()]
-                    .parse()
-                    // since all characters are digits, an error must mean that we got no
-                    // characters
-                    .map_err(|_| ParsingError::new(Span::single(0)))
+                if span.len() > 0 {
+                    eprintln!("input={:?}, span={:?}", input, span);
+                    input[span.clone()].chars().try_fold(0u128, |acc, digit| {
+                        acc.checked_mul(10)
+                            .map(|v| v.checked_add(digits.find(digit).unwrap() as u128))
+                            .flatten()
+                            .ok_or(ParsingError::new(span.clone()))
+                    })
+                } else {
+                    Err(ParsingError::new(Span::single(input.location)))
+                }
             })
             .parse(input)
     }

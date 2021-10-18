@@ -1,7 +1,7 @@
 use crate::{
     error::ParsingError,
     parser::{
-        parsers::{BoolParser, CharParser, IntegerParser, StrParser, Ws},
+        parsers::{CharParser, IntegerParser, StrParser, Ws},
         Input, Parser, Span,
     },
 };
@@ -43,25 +43,6 @@ fn test_string_parser() {
 }
 
 #[test]
-fn test_bool_parser() {
-    let input = Input::from_str("true");
-    let (rest, output) = BoolParser.parse(input).unwrap();
-    assert_eq!(rest.location, 4);
-    assert_eq!(rest.s, "");
-    assert_eq!(output, true);
-
-    let input = Input::from_str("false indeed");
-    let (rest, output) = BoolParser.parse(input).unwrap();
-    assert_eq!(rest.location, 5);
-    assert_eq!(rest.s, " indeed");
-    assert_eq!(output, false);
-
-    let input = Input::from_str("truish");
-    let err = BoolParser.parse(input).unwrap_err();
-    assert_eq!(err, ParsingError::new(Span::single(3)));
-}
-
-#[test]
 fn test_whitespace_parser() {
     let input = Input::from_str("   \t \n kool");
     let (rest, span) = Ws.parse(input).unwrap();
@@ -73,31 +54,43 @@ fn test_whitespace_parser() {
 
 #[test]
 fn test_add_parser() {
-    let input = Input::from_str("true false");
-    let (rest, output) = (BoolParser.c() + Ws + BoolParser).parse(input).unwrap();
+    let input = Input::from_str("very true");
+    let (rest, output) = (StrParser("very").c() + Ws + StrParser("true"))
+        .parse(input)
+        .unwrap();
 
-    assert_eq!(rest.location, 10);
+    assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, ((true, Span::single(4)), false));
+    assert_eq!(output, (("very", Span::single(4)), "true"));
 
     let input = Input::from_str("verytrue");
-    let (rest, output) = (StrParser("very").c() + BoolParser).parse(input).unwrap();
+    let (rest, output) = (StrParser("very").c() + StrParser("true"))
+        .parse(input)
+        .unwrap();
 
     assert_eq!(rest.location, 8);
     assert_eq!(rest.s, "");
-    assert_eq!(output, ("very", true));
+    assert_eq!(output, ("very", "true"));
 }
 
 #[test]
 fn test_shift_parser() {
-    let input = Input::from_str("true false");
-    let (rest, output) = ((BoolParser.c() << Ws).c() + BoolParser)
+    let input = Input::from_str("a b");
+    let (rest, output) = ((CharParser('a').c() << Ws).c() + CharParser('b'))
         .parse(input)
         .unwrap();
 
-    assert_eq!(rest.location, 10);
+    assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, (true, false));
+    assert_eq!(output, ('a', 'b'));
+
+    let (rest, output) = (CharParser('a').c() + (Ws.c() >> CharParser('b')))
+        .parse(input)
+        .unwrap();
+
+    assert_eq!(rest.location, input.s.len());
+    assert_eq!(rest.s, "");
+    assert_eq!(output, ('a', 'b'));
 
     let input = Input::from_str("big boi!!");
     let (rest, output) = (StrParser("big").c() >> Ws >> StrParser("boi") << StrParser("!"))
@@ -113,20 +106,21 @@ fn test_shift_parser() {
 fn test_or_parser() {
     #[derive(Debug, PartialEq, Eq, Clone, Copy)]
     enum Cases<'s> {
-        Bool(bool),
+        Char(char),
         Str(&'s str),
-        Int(u64),
+        Int(u128),
     }
-    let parser = BoolParser.map(Cases::Bool).c()
-        | StrParser("aoeu").map(Cases::Str)
-        | IntegerParser.map(Cases::Int);
 
-    let input = Input::from_str("true");
+    let parser = CharParser('c').map(Cases::Char).c()
+        | StrParser("aoeu").map(Cases::Str)
+        | IntegerParser { base: 10 }.map(Cases::Int);
+
+    let input = Input::from_str("c");
     let (rest, output) = parser.parse(input).unwrap();
 
     assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, Cases::Bool(true));
+    assert_eq!(output, Cases::Char('c'));
 
     let input = Input::from_str("aoeu");
     let (rest, output) = parser.parse(input).unwrap();
@@ -151,23 +145,30 @@ fn test_or_parser() {
 #[test]
 fn test_integer_parser() {
     let input = Input::from_str("69420");
-    let (rest, output) = IntegerParser.parse(input).unwrap();
+    let (rest, output) = IntegerParser { base: 10 }.parse(input).unwrap();
 
     assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
     assert_eq!(output, 69420);
 
-    let input = Input::from_str("420, ");
-    let (rest, output) = IntegerParser.parse(input).unwrap();
+    let input = Input::from_str("a, ");
+    let (rest, output) = IntegerParser { base: 16 }.parse(input).unwrap();
 
-    assert_eq!(rest.location, 3);
+    assert_eq!(rest.location, 1);
     assert_eq!(rest.s, ", ");
-    assert_eq!(output, 420);
+    assert_eq!(output, 10);
 
-    let input = Input::from_str("x");
-    let err = IntegerParser.parse(input).unwrap_err();
+    let input = Input::from_str("deadbeef");
+    let err = IntegerParser { base: 10 }.parse(input).unwrap_err();
 
     assert_eq!(err, ParsingError::new(Span::single(0)));
+
+    let input = Input::from_str("340282366920938463463374607431768211457");
+    let err = IntegerParser { base: 10 }.parse(input).unwrap_err();
+
+    assert_eq!(err, ParsingError::new(Span::new(0..input.s.len())));
+}
+
 #[test]
 fn test_optional_parser() {
     let parser = StrParser("hej").c() >> IntegerParser { base: 10 }.optional() << StrParser("då");
