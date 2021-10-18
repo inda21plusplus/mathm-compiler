@@ -1,6 +1,9 @@
 use crate::{
     error::ParsingError,
-    parser::{BoolParser, CharParser, Input, IntegerParser, Parser, Span, StrParser, Ws},
+    parser::{
+        parsers::{BoolParser, CharParser, IntegerParser, StrParser, Ws},
+        Input, Parser, Span,
+    },
 };
 
 #[test]
