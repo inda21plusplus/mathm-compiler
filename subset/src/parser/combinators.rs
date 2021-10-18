@@ -4,9 +4,10 @@ use crate::error::ParsingError;
 
 use super::{
     parser::{LeftParser, RightParser},
-    AndParser, EitherParser, Input, OrParser, Parser,
+    AndParser, Input, OrParser, Parser,
 };
 
+#[derive(Debug, Clone, Copy)]
 pub struct ParserCombinator<P: Parser>(pub P);
 
 impl<P: Parser> Parser for ParserCombinator<P> {
@@ -49,18 +50,12 @@ impl<L: Parser + Sized, R: Parser + Sized> ops::Add<R> for ParserCombinator<L> {
     }
 }
 
-impl<P: Parser + Sized> ops::BitOr<P> for ParserCombinator<P> {
-    type Output = ParserCombinator<OrParser<P>>;
+impl<O, L: Parser<Output = O> + Sized, R: Parser<Output = O> + Sized> ops::BitOr<R>
+    for ParserCombinator<L>
+{
+    type Output = ParserCombinator<OrParser<O, L, R>>;
 
-    fn bitor(self, rhs: P) -> Self::Output {
+    fn bitor(self, rhs: R) -> Self::Output {
         ParserCombinator(OrParser(self.0, rhs))
-    }
-}
-
-impl<L: Parser + Sized, R: Parser + Sized> ops::Div<R> for ParserCombinator<L> {
-    type Output = ParserCombinator<EitherParser<L, R>>;
-
-    fn div(self, rhs: R) -> Self::Output {
-        ParserCombinator(EitherParser(self.0, rhs))
     }
 }

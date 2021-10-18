@@ -1,6 +1,6 @@
 use crate::{
     error::ParsingError,
-    parser::{ws, BoolParser, CharParser, Either, Input, IntegerParser, Parser, Span, StrParser},
+    parser::{BoolParser, CharParser, Input, IntegerParser, Parser, Span, StrParser, Ws},
 };
 
 #[test]
@@ -61,7 +61,7 @@ fn test_bool_parser() {
 #[test]
 fn test_whitespace_parser() {
     let input = Input::from_str("   \t \n kool");
-    let (rest, span) = ws().parse(input).unwrap();
+    let (rest, span) = Ws.parse(input).unwrap();
 
     assert_eq!(rest.location, 7);
     assert_eq!(rest.s, "kool");
@@ -71,7 +71,7 @@ fn test_whitespace_parser() {
 #[test]
 fn test_add_parser() {
     let input = Input::from_str("true false");
-    let (rest, output) = (BoolParser.c() + ws() + BoolParser).parse(input).unwrap();
+    let (rest, output) = (BoolParser.c() + Ws + BoolParser).parse(input).unwrap();
 
     assert_eq!(rest.location, 10);
     assert_eq!(rest.s, "");
@@ -88,7 +88,7 @@ fn test_add_parser() {
 #[test]
 fn test_shift_parser() {
     let input = Input::from_str("true false");
-    let (rest, output) = ((BoolParser.c() << ws()).c() + BoolParser)
+    let (rest, output) = ((BoolParser.c() << Ws).c() + BoolParser)
         .parse(input)
         .unwrap();
 
@@ -97,7 +97,7 @@ fn test_shift_parser() {
     assert_eq!(output, (true, false));
 
     let input = Input::from_str("big boi!!");
-    let (rest, output) = (StrParser("big").c() >> ws() >> StrParser("boi") << StrParser("!"))
+    let (rest, output) = (StrParser("big").c() >> Ws >> StrParser("boi") << StrParser("!"))
         .parse(input)
         .unwrap();
 
@@ -107,25 +107,40 @@ fn test_shift_parser() {
 }
 
 #[test]
-fn test_either_parser() {
+fn test_or_parser() {
+    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+    enum Cases<'s> {
+        Bool(bool),
+        Str(&'s str),
+        Int(u64),
+    }
+    let parser = BoolParser.map(Cases::Bool).c()
+        | StrParser("aoeu").map(Cases::Str)
+        | IntegerParser.map(Cases::Int);
+
     let input = Input::from_str("true");
-    let (rest, output) = (BoolParser.c() / StrParser("aoeu")).parse(input).unwrap();
+    let (rest, output) = parser.parse(input).unwrap();
 
     assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, Either::L(true));
+    assert_eq!(output, Cases::Bool(true));
 
     let input = Input::from_str("aoeu");
-    let (rest, output) = (BoolParser.c() / StrParser("aoeu")).parse(input).unwrap();
+    let (rest, output) = parser.parse(input).unwrap();
 
     assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, Either::R("aoeu"));
+    assert_eq!(output, Cases::Str("aoeu"));
+
+    let input = Input::from_str("69");
+    let (rest, output) = parser.parse(input).unwrap();
+
+    assert_eq!(rest.location, input.s.len());
+    assert_eq!(rest.s, "");
+    assert_eq!(output, Cases::Int(69));
 
     let input = Input::from_str("htns");
-    let err = (BoolParser.c() / StrParser("aoeu"))
-        .parse(input)
-        .unwrap_err();
+    let err = parser.parse(input).unwrap_err();
 
     assert_eq!(err, ParsingError::new(Span::single(0)));
 }

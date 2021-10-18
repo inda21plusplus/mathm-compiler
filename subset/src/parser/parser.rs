@@ -1,4 +1,4 @@
-use super::{ops::ParserCombinator, Input};
+use super::{combinators::ParserCombinator, Input};
 use crate::error::ParsingError;
 
 pub trait Parser {
@@ -15,14 +15,21 @@ pub trait Parser {
         ParserCombinator(self)
     }
 
-    fn map<T, F: FnOnce(Self::Output) -> Result<T, ParsingError>>(
-        self,
-        f: F,
-    ) -> MapParser<Self, T, F>
+    fn map<T, F: FnOnce(Self::Output) -> T>(self, f: F) -> MapParser<Self, T, F>
     where
         Self: Sized,
     {
         MapParser(self, f)
+    }
+
+    fn try_map<T, F: FnOnce(Self::Output) -> Result<T, ParsingError>>(
+        self,
+        f: F,
+    ) -> TryMapParser<Self, T, F>
+    where
+        Self: Sized,
+    {
+        TryMapParser(self, f)
     }
 }
 
@@ -36,9 +43,24 @@ impl<T> Parser for PureParser<T> {
     }
 }
 
-pub struct MapParser<P: Parser, T, F: FnOnce(P::Output) -> Result<T, ParsingError>>(P, F);
+#[derive(Debug, Clone, Copy)]
+pub struct MapParser<P: Parser, T, F: FnOnce(P::Output) -> T>(P, F);
 
-impl<P: Parser, T, F: FnOnce(P::Output) -> Result<T, ParsingError>> Parser for MapParser<P, T, F> {
+impl<P: Parser, T, F: FnOnce(P::Output) -> T> Parser for MapParser<P, T, F> {
+    type Output = T;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
+        let (rest, output) = self.0.parse(input)?;
+        Ok((rest, self.1(output)))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TryMapParser<P: Parser, T, F: FnOnce(P::Output) -> Result<T, ParsingError>>(P, F);
+
+impl<P: Parser, T, F: FnOnce(P::Output) -> Result<T, ParsingError>> Parser
+    for TryMapParser<P, T, F>
+{
     type Output = T;
 
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
@@ -47,35 +69,17 @@ impl<P: Parser, T, F: FnOnce(P::Output) -> Result<T, ParsingError>> Parser for M
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Either<L, R> {
-    L(L),
-    R(R),
-}
-pub struct EitherParser<L: Parser, R: Parser>(pub L, pub R);
-pub struct OrParser<P: Parser>(pub P, pub P);
+#[derive(Debug, Clone, Copy)]
+pub struct OrParser<O, L: Parser<Output = O>, R: Parser<Output = O>>(pub L, pub R);
+#[derive(Debug, Clone, Copy)]
 pub struct AndParser<A: Parser, B: Parser>(pub A, pub B);
+#[derive(Debug, Clone, Copy)]
 pub struct LeftParser<L: Parser, R: Parser>(pub L, pub R);
+#[derive(Debug, Clone, Copy)]
 pub struct RightParser<A: Parser, B: Parser>(pub A, pub B);
 
-impl<L: Parser, R: Parser> Parser for EitherParser<L, R> {
-    type Output = Either<L::Output, R::Output>;
-
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
-        let err0 = match self.0.parse(input) {
-            Ok((rest, output)) => return Ok((rest, Either::L(output))),
-            Err(err) => err,
-        };
-        let err1 = match self.1.parse(input) {
-            Ok((rest, output)) => return Ok((rest, Either::R(output))),
-            Err(err) => err,
-        };
-        Err(if err0.at > err1.at { err0 } else { err1 })
-    }
-}
-
-impl<P: Parser> Parser for OrParser<P> {
-    type Output = P::Output;
+impl<O, L: Parser<Output = O>, R: Parser<Output = O>> Parser for OrParser<O, L, R> {
+    type Output = O;
 
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
         let err0 = match self.0.parse(input) {

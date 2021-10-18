@@ -3,11 +3,11 @@ use std::{cmp, ops::Range};
 
 use crate::error::ParsingError;
 
+mod combinators;
 mod keywords;
-mod ops;
 mod parser;
 
-pub use parser::{AndParser, Either, EitherParser, OrParser, Parser};
+pub use parser::{AndParser, OrParser, Parser};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Span(pub Range<usize>); // todo: in which file?
@@ -66,6 +66,7 @@ impl<'s> Input<'s> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct CharParser(pub char);
 
 impl Parser for CharParser {
@@ -81,6 +82,7 @@ impl Parser for CharParser {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct StrParser<'s>(pub &'s str);
 
 impl<'s> Parser for StrParser<'s> {
@@ -95,6 +97,7 @@ impl<'s> Parser for StrParser<'s> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct SpanParser<P: Fn(char) -> bool>(P);
 
 impl<P: Fn(char) -> bool> Parser for SpanParser<P> {
@@ -113,45 +116,30 @@ impl<P: Fn(char) -> bool> Parser for SpanParser<P> {
     }
 }
 
-pub fn ws() -> SpanParser<impl Fn(char) -> bool> {
-    SpanParser(char::is_whitespace)
-}
-
+#[derive(Debug, Clone, Copy)]
 pub struct Ws;
 
 impl Parser for Ws {
     type Output = Span;
 
-    fn parse<'i>(self, mut input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
-        let start = input.location;
-        while let Some((rest, ch)) = input.next() {
-            if ch.is_whitespace() {
-                input = rest;
-            } else {
-                break;
-            }
-        }
-        Ok((input, Span::new(start..input.location)))
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
+        SpanParser(char::is_whitespace).parse(input)
     }
 }
 
 // todo: remove, just for testing
+#[derive(Debug, Clone, Copy)]
 pub struct BoolParser;
 
 impl Parser for BoolParser {
     type Output = bool;
 
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
-        (StrParser("true").c() | StrParser("false"))
-            .parse(input)
-            .map(|(rest, output)| match output {
-                "true" => (rest, true),
-                "false" => (rest, false),
-                _ => unreachable!(),
-            })
+        (StrParser("true").map(|_| true).c() | StrParser("false").map(|_| false)).parse(input)
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct IntegerParser;
 
 impl Parser for IntegerParser {
@@ -160,9 +148,11 @@ impl Parser for IntegerParser {
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
         // todo: different bases and suffixes indicating type e.g. 0b101010usize
         SpanParser(|ch| ch.is_digit(10))
-            .map(|span| {
+            .try_map(|span| {
                 input.s[span.0.clone()]
                     .parse()
+                    // since all characters are digits, an error must mean that we got no
+                    // characters
                     .map_err(|_| ParsingError::new(Span::single(0)))
             })
             .parse(input)
