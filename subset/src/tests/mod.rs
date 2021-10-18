@@ -168,4 +168,21 @@ fn test_integer_parser() {
     let err = IntegerParser.parse(input).unwrap_err();
 
     assert_eq!(err, ParsingError::new(Span::single(0)));
+#[test]
+fn test_optional_parser() {
+    let parser = StrParser("hej").c() >> IntegerParser { base: 10 }.optional() << StrParser("då");
+
+    let input = Input::from_str("hej123då");
+    let (rest, output) = parser.parse(input).unwrap();
+
+    assert_eq!(rest.location, input.s.len());
+    assert_eq!(rest.s, "");
+    assert_eq!(output, Some(123));
+
+    let input = Input::from_str("hejdå");
+    let (rest, output) = parser.parse(input).unwrap();
+
+    assert_eq!(rest.location, input.s.len());
+    assert_eq!(rest.s, "");
+    assert_eq!(output, None);
 }

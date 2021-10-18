@@ -2,7 +2,7 @@ use core::fmt;
 use std::{cmp, ops::Range};
 
 use crate::error::ParsingError;
-use combinators::{MapParser, ParserCombinator, TryMapParser};
+use combinators::{MapParser, OptionalParser, ParserCombinator, TryMapParser};
 
 mod combinators;
 mod keywords;
@@ -10,8 +10,10 @@ mod keywords;
 /// A collection of parsers that parse specific things
 pub mod parsers {
     mod basic;
+    mod number;
 
-    pub use basic::{BoolParser, CharParser, IntegerParser, SpanParser, StrParser, Ws};
+    pub use basic::{CharParser, IntegerParser, SpanParser, StrParser, Ws};
+    pub use number::IntegerLiteralParser;
 }
 
 pub trait Parser {
@@ -44,9 +46,16 @@ pub trait Parser {
     {
         TryMapParser(self, f)
     }
+
+    fn optional(self) -> OptionalParser<Self>
+    where
+        Self: Sized,
+    {
+        OptionalParser(self)
+    }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Span(pub Range<usize>); // todo: in which file?
 
 impl Span {
@@ -55,6 +64,9 @@ impl Span {
     }
     pub fn single(at: usize) -> Self {
         Self(at..at + 1)
+    }
+    pub fn len(&self) -> usize {
+        self.0.end - self.0.start
     }
 }
 

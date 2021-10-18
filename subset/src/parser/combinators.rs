@@ -153,3 +153,17 @@ impl<P: Parser, T, F: FnOnce(P::Output) -> Result<T, ParsingError>> Parser
         Ok((rest, self.1(output)?))
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct OptionalParser<P: Parser>(pub P);
+
+impl<P: Parser> Parser for OptionalParser<P> {
+    type Output = Option<P::Output>;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
+        match self.0.parse(input) {
+            Ok((rest, output)) => Ok((rest, Some(output))),
+            Err(_) => Ok((input, None)),
+        }
+    }
+}
