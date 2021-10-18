@@ -1,17 +1,21 @@
 use std::error::Error as StdError;
 use std::fmt;
 
-use crate::parser::Span;
-
 #[derive(Debug)]
 pub enum Error {
-    Parsing(ParsingError),
+    Parcom(parcom::Error),
+}
+
+impl From<parcom::Error> for Error {
+    fn from(err: parcom::Error) -> Self {
+        Self::Parcom(err)
+    }
 }
 
 impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
-            Self::Parsing(err) => Some(err),
+            Self::Parcom(err) => Some(err),
         }
     }
 }
@@ -19,28 +23,9 @@ impl StdError for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Parsing(p) => {
-                write!(f, "{}", p)
+            Self::Parcom(p) => {
+                write!(f, "From parcom {}", p)
             }
         }
     }
 }
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct ParsingError {
-    pub at: Span,
-}
-
-impl ParsingError {
-    pub fn new(at: Span) -> Self {
-        Self { at }
-    }
-}
-
-impl fmt::Display for ParsingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Parsing error at {}", self.at)
-    }
-}
-
-impl StdError for ParsingError {}

@@ -3,5 +3,12 @@
 version = 3
 
 [[package]]
+name = "parcom"
+version = "0.1.0"
+
+[[package]]
 name = "subset"
 version = "0.1.0"
+dependencies = [
+ "parcom",
+]

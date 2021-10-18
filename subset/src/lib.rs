@@ -1,5 +1,5 @@
 mod error;
-pub mod parser;
+pub mod parsing;
 
 #[cfg(test)]
 mod tests;

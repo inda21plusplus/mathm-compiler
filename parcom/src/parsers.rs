@@ -1,6 +1,6 @@
-use super::super::{Input, Parser, Span};
+//! A collection of parsers that parse specific things
 
-use crate::error::ParsingError;
+use crate::{Error, Input, Parser, Span};
 
 #[derive(Debug, Clone, Copy)]
 pub struct CharParser(pub char);
@@ -8,10 +8,10 @@ pub struct CharParser(pub char);
 impl Parser for CharParser {
     type Output = char;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
         match input.next() {
             Some((rest, c)) if c == self.0 => Ok((rest, c)),
-            _ => Err(ParsingError {
+            _ => Err(Error {
                 at: Span::single(input.location),
             }),
         }
@@ -24,7 +24,7 @@ pub struct StrParser<'s>(pub &'s str);
 impl<'s> Parser for StrParser<'s> {
     type Output = &'s str;
 
-    fn parse<'i>(self, mut input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
+    fn parse<'i>(self, mut input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
         for parser in self.0.chars().map(CharParser) {
             input = parser.parse(input)?.0;
         }
@@ -39,7 +39,7 @@ pub struct SpanParser<P: Fn(char) -> bool>(pub P);
 impl<P: Fn(char) -> bool> Parser for SpanParser<P> {
     type Output = Span;
 
-    fn parse<'i>(self, mut input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
+    fn parse<'i>(self, mut input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
         let start = input.location;
         while let Some((rest, ch)) = input.next() {
             if self.0(ch) {
@@ -58,7 +58,7 @@ pub struct Ws;
 impl Parser for Ws {
     type Output = Span;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
         SpanParser(char::is_whitespace).parse(input)
     }
 }
@@ -73,7 +73,7 @@ impl Parser for IntegerParser {
     type Output = u128;
 
     // todo: clean up?
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), ParsingError> {
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
         let digits = &"0123456789abcdef"[0..self.base as usize];
         SpanParser(|ch| digits.contains(ch))
             .try_map(|span| {
@@ -83,10 +83,10 @@ impl Parser for IntegerParser {
                         acc.checked_mul(10)
                             .map(|v| v.checked_add(digits.find(digit).unwrap() as u128))
                             .flatten()
-                            .ok_or(ParsingError::new(span.clone()))
+                            .ok_or(Error::new(span.clone()))
                     })
                 } else {
-                    Err(ParsingError::new(Span::single(input.location)))
+                    Err(Error::new(Span::single(input.location)))
                 }
             })
             .parse(input)
