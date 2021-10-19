@@ -1,6 +1,6 @@
 use std::ops;
 
-use crate::{Error, Input, Parser};
+use crate::{Error, Input, Parser, Span};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParserCombinator<P: Parser>(pub P);
@@ -157,6 +157,21 @@ impl<P: Parser> Parser for OptionalParser<P> {
         match self.0.parse(input) {
             Ok((rest, output)) => Ok((rest, Some(output))),
             Err(_) => Ok((input, None)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WhenParser<P: Parser>(pub P, pub bool);
+
+impl<P: Parser> Parser for WhenParser<P> {
+    type Output = P::Output;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        if !self.1 {
+            Err(Error::new(Span::first(&input)))
+        } else {
+            self.0.parse(input)
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    combinators::{MapParser, OptionalParser, ParserCombinator, TryMapParser},
+    combinators::{MapParser, OptionalParser, ParserCombinator, TryMapParser, WhenParser},
     Error, Input,
 };
 
@@ -39,5 +39,12 @@ pub trait Parser {
         Self: Sized,
     {
         OptionalParser(self)
+    }
+
+    fn when(self, when: bool) -> WhenParser<Self>
+    where
+        Self: Sized,
+    {
+        WhenParser(self, when)
     }
 }

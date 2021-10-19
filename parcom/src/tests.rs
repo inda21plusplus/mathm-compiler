@@ -187,3 +187,21 @@ fn test_optional_parser() {
     assert_eq!(rest.s, "");
     assert_eq!(output, None);
 }
+
+#[test]
+fn test_when_parser() {
+    let input = Input::from_str("123");
+    let (_, output) = (StrParser("123").when(false).map(|_| "str").c()
+        | IntegerParser { base: 10 }.map(|_| "int"))
+    .parse(input)
+    .unwrap();
+
+    assert_eq!(output, "int");
+
+    let (_, output) = (StrParser("123").when(true).map(|_| "str").c()
+        | IntegerParser { base: 10 }.map(|_| "int"))
+    .parse(input)
+    .unwrap();
+
+    assert_eq!(output, "str");
+}
