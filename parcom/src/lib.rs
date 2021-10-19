@@ -11,7 +11,7 @@ pub mod parsers;
 pub use error::Error;
 pub use parser::Parser;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Span {
     start: usize,
     end: usize,
@@ -69,7 +69,7 @@ impl<'s> Input<'s> {
     pub fn from_str(s: &'s str) -> Input<'s> {
         Self { location: 0, s }
     }
-    fn next(&self) -> Option<(Self, char)> {
+    pub fn next(&self) -> Option<(Self, char)> {
         self.s.chars().next().map(|c| {
             (
                 Self {

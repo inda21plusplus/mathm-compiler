@@ -79,9 +79,8 @@ impl Parser for IntegerParser {
         SpanParser(|ch| digits.contains(ch))
             .try_map(|span| {
                 if span.len() > 0 {
-                    eprintln!("input={:?}, span={:?}", input, span);
                     input[span.clone()].chars().try_fold(0u128, |acc, digit| {
-                        acc.checked_mul(10)
+                        acc.checked_mul(self.base.into())
                             .map(|v| v.checked_add(digits.find(digit).unwrap() as u128))
                             .flatten()
                             .ok_or(Error::new(span.clone()))
