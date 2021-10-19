@@ -17,7 +17,7 @@ pub enum Expr {
     Ident(Identifier),
     DotAccess(DotAccess),
     UnaryOperation(UnaryOperation),
-    // BinaryOperation(BinaryOperation),
+    BinaryOperation(BinaryOperation),
     // Constuction(Constuction),
     // Evocation(Evocation),
 
@@ -28,16 +28,24 @@ pub enum Expr {
 }
 
 mod precedence_levels {
-    pub const UNARY_OPERATION: usize = 1;
-    pub const DOT_ACCESS: usize = 2;
+    pub const BINARY_OR_AND: usize = 1;
+    pub const BINARY_EQ_NEQ: usize = 2;
+    pub const BINARY_ORDERING: usize = 3;
+    pub const BINARY_TERMS: usize = 4;
+    pub const BINARY_FACTORS: usize = 5;
+    pub const BINARY_MOD: usize = 6;
+    pub const UNARY_OPERATION: usize = 7;
+    pub const DOT_ACCESS: usize = 8;
 }
 
 impl Expr {
     pub fn parser(precedence_level: usize) -> impl Parser<Output = Self> {
-        UnaryOperationParser
-            .when(precedence_level <= precedence_levels::UNARY_OPERATION)
-            .map(Self::UnaryOperation)
+        BinaryOperationParser(precedence_level)
+            .when(precedence_level < precedence_levels::UNARY_OPERATION)
             .c()
+            | UnaryOperationParser
+                .when(precedence_level <= precedence_levels::UNARY_OPERATION)
+                .map(Self::UnaryOperation)
             | DotAccessParser.when(precedence_level < precedence_levels::DOT_ACCESS)
             | Literal::parser().map(Self::Literal)
             | IdentifierParser.map(Self::Ident)
@@ -175,5 +183,81 @@ impl Parser for UnaryOperationParser {
             expr,
         })
         .parse(input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BinaryOperation {
+    pub span: Span,
+    pub left: Box<Expr>,
+    pub op: BinaryOperatorKind,
+    pub right: Box<Expr>,
+}
+
+#[derive(Debug, Clone, Copy)]
+#[rustfmt::skip]
+pub enum BinaryOperatorKind {
+    Add, Sub, Mul, Div, Mod,
+    And, Or, Eq, Neq,
+    Lt, Leq, Gt, Geq,
+}
+
+impl BinaryOperatorKind {
+    fn precedence_level(&self) -> usize {
+        use BinaryOperatorKind::*;
+        match self {
+            Mod => precedence_levels::BINARY_MOD,
+            Mul | Div => precedence_levels::BINARY_FACTORS,
+            Add | Sub => precedence_levels::BINARY_TERMS,
+            Or | And => precedence_levels::BINARY_OR_AND,
+            Eq | Neq => precedence_levels::BINARY_EQ_NEQ,
+            Lt | Leq | Gt | Geq => precedence_levels::BINARY_ORDERING,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BinaryOperationParser(usize);
+
+impl Parser for BinaryOperationParser {
+    type Output = Expr;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        let (mut input, mut expr) = Expr::parser(precedence_levels::UNARY_OPERATION)
+            .map(Box::new)
+            .parse(input)?;
+
+        while let Ok((rest, op)) = ((CharParser('+').map(|_| BinaryOperatorKind::Add).c()
+            | CharParser('-').map(|_| BinaryOperatorKind::Sub)
+            | CharParser('×').map(|_| BinaryOperatorKind::Mul)
+            | CharParser('/').map(|_| BinaryOperatorKind::Div)
+            | CharParser('%').map(|_| BinaryOperatorKind::Mod)
+            | CharParser('∧').map(|_| BinaryOperatorKind::And)
+            | CharParser('∨').map(|_| BinaryOperatorKind::Or)
+            | CharParser('=').map(|_| BinaryOperatorKind::Eq)
+            | CharParser('≠').map(|_| BinaryOperatorKind::Neq)
+            | CharParser('<').map(|_| BinaryOperatorKind::Lt)
+            | CharParser('≤').map(|_| BinaryOperatorKind::Leq)
+            | CharParser('>').map(|_| BinaryOperatorKind::Gt)
+            | CharParser('≥').map(|_| BinaryOperatorKind::Geq))
+        .c())
+        .parse(input)
+        {
+            if op.precedence_level() <= self.0 {
+                break;
+            }
+            let (rest, right) = Expr::parser(op.precedence_level())
+                .map(Box::new)
+                .parse(rest)?;
+            input = rest;
+            expr = Box::new(Expr::BinaryOperation(BinaryOperation {
+                span: expr.span().merge(right.span()),
+                left: expr,
+                op,
+                right,
+            }));
+        }
+
+        Ok((input, *expr))
     }
 }

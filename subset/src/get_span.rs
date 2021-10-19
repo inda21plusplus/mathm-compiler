@@ -13,6 +13,7 @@ impl GetSpan for Expr {
             Self::Ident(i) => i.span,
             Self::DotAccess(d) => d.span,
             Self::UnaryOperation(u) => u.span,
+            Self::BinaryOperation(b) => b.span,
         }
     }
 }
