@@ -46,7 +46,14 @@ fn test_whitespace_parser() {
 
     assert_eq!(rest.location, 7);
     assert_eq!(rest.s, "kool");
-    assert_eq!(span, Span::new(0..7));
+    assert_eq!(span, Some(Span::new(0..7)));
+
+    let input = Input::from_str("asdf");
+    let (rest, span) = Ws.parse(input).unwrap();
+
+    assert_eq!(rest.location, 0);
+    assert_eq!(rest.s, "asdf");
+    assert_eq!(span, None);
 }
 
 #[test]
@@ -60,7 +67,7 @@ fn test_add_parser() {
     assert_eq!(rest.s, "");
     assert_eq!(
         output,
-        ((Span::new(0..4), Span::new(4..5)), Span::new(5..9))
+        ((Span::new(0..4), Some(Span::new(4..5))), Span::new(5..9))
     );
 
     let input = Input::from_str("verytrue");
