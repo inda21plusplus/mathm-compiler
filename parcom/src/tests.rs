@@ -17,7 +17,7 @@ fn test_char_parser() {
     assert_eq!(output, 'u');
 
     let err = CharParser('a').parse(input).unwrap_err();
-    assert_eq!(err, Error::new(Span::single(2)));
+    assert_eq!(err, Error::new(Span::new(2..3)));
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn test_string_parser() {
 
     let input = Input::from_str("nil");
     let err = StrParser("null").parse(input).unwrap_err();
-    assert_eq!(err, Error::new(Span::single(1)));
+    assert_eq!(err, Error::new(Span::new(1..2)));
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn test_add_parser() {
 
     assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, (("very", Span::single(4)), "true"));
+    assert_eq!(output, (("very", Span::new(4..5)), "true"));
 
     let input = Input::from_str("verytrue");
     let (rest, output) = (StrParser("very").c() + StrParser("true"))
@@ -136,7 +136,7 @@ fn test_or_parser() {
     let input = Input::from_str("htns");
     let err = parser.parse(input).unwrap_err();
 
-    assert_eq!(err, Error::new(Span::single(0)));
+    assert_eq!(err, Error::new(Span::new(0..1)));
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn test_integer_parser() {
     let input = Input::from_str("deadbeef");
     let err = IntegerParser { base: 10 }.parse(input).unwrap_err();
 
-    assert_eq!(err, Error::new(Span::single(0)));
+    assert_eq!(err, Error::new(Span::new(0..1)));
 
     let input = Input::from_str("340282366920938463463374607431768211457");
     let err = IntegerParser { base: 10 }.parse(input).unwrap_err();

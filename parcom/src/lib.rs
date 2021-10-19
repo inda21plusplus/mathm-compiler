@@ -12,29 +12,39 @@ pub use error::Error;
 pub use parser::Parser;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Span(pub Range<usize>); // todo: in which file?
+pub struct Span {
+    start: usize,
+    end: usize,
+    // todo: in which file?
+}
 
 impl Span {
     pub fn new(range: Range<usize>) -> Self {
-        Self(range)
+        Self {
+            start: range.start,
+            end: range.end,
+        }
     }
-    pub fn single(at: usize) -> Self {
-        Self(at..at + 1)
+    pub fn first(input: &Input<'_>) -> Self {
+        Self {
+            start: input.location,
+            end: input.location + input.s.chars().next().map(|ch| ch.len_utf8()).unwrap_or(1),
+        }
     }
     pub fn len(&self) -> usize {
-        self.0.end - self.0.start
+        self.end - self.start
     }
 }
 
 impl PartialOrd for Span {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        Some(if self.0.start < other.0.start {
+        Some(if self.start < other.start {
             cmp::Ordering::Less
-        } else if self.0.start > other.0.start {
+        } else if self.start > other.start {
             cmp::Ordering::Greater
-        } else if self.0.end < other.0.end {
+        } else if self.end < other.end {
             cmp::Ordering::Less
-        } else if self.0.start > other.0.start {
+        } else if self.start > other.start {
             cmp::Ordering::Greater
         } else {
             cmp::Ordering::Equal
@@ -44,7 +54,7 @@ impl PartialOrd for Span {
 
 impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}..{}", self.0.start, self.0.end)
+        write!(f, "{}..{}", self.start, self.end)
     }
 }
 
@@ -76,6 +86,6 @@ impl<'s> std::ops::Index<Span> for Input<'s> {
     type Output = str;
 
     fn index(&self, i: Span) -> &Self::Output {
-        &self.s[i.0.start - self.location..i.0.end - self.location]
+        &self.s[i.start - self.location..i.end - self.location]
     }
 }

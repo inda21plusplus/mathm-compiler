@@ -12,7 +12,7 @@ impl Parser for CharParser {
         match input.next() {
             Some((rest, c)) if c == self.0 => Ok((rest, c)),
             _ => Err(Error {
-                at: Span::single(input.location),
+                at: Span::first(&input),
             }),
         }
     }
@@ -86,7 +86,7 @@ impl Parser for IntegerParser {
                             .ok_or(Error::new(span.clone()))
                     })
                 } else {
-                    Err(Error::new(Span::single(input.location)))
+                    Err(Error::new(Span::first(&input)))
                 }
             })
             .parse(input)
