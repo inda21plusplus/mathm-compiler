@@ -44,6 +44,10 @@ impl Parser for IntegerLiteralParser {
                 .checked_pow(exponent as u32)
                 .ok_or(Error::new(Span::new(start..input.location)))?;
 
+        if input.next().map(|(_, next_char)| next_char.is_alphabetic()) == Some(true) {
+            return Err(Error::new(Span::first(&input)));
+        }
+
         Ok((
             input,
             Self::Output {

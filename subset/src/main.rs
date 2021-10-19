@@ -23,9 +23,9 @@ fn main() {
         };
 
         let input = Input::from_str(&line);
-        match parsing::Expr::parser().parse(input) {
-            Ok((Input { s: "", .. }, output)) => println!("{:?}", output),
-            Ok((Input { location, .. }, _)) => println!("Parsing error at {}..", location),
+        match parsing::Expr::parser(0).parse(input) {
+            Ok((Input { s: "", .. }, output)) => println!("{:#?}", output),
+            Ok((Input { location, .. }, _)) => println!("Expected end of input at {}..", location),
             Err(err) => println!("Parsing error at {}", err.at),
         }
     }
