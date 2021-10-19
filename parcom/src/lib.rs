@@ -11,7 +11,7 @@ pub mod parsers;
 pub use error::Error;
 pub use parser::Parser;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Ord)]
 pub struct Span {
     start: usize,
     end: usize,
@@ -34,6 +34,12 @@ impl Span {
     pub fn len(&self) -> usize {
         self.end - self.start
     }
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
+    }
 }
 
 impl PartialOrd for Span {
@@ -44,7 +50,7 @@ impl PartialOrd for Span {
             cmp::Ordering::Greater
         } else if self.end < other.end {
             cmp::Ordering::Less
-        } else if self.start > other.start {
+        } else if self.end > other.end {
             cmp::Ordering::Greater
         } else {
             cmp::Ordering::Equal

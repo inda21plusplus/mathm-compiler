@@ -5,19 +5,19 @@ use crate::{
 
 #[test]
 fn test_char_parser() {
-    let input = Input::from_str("null");
+    let input = Input::from_str("nüll");
     let (input, output) = CharParser('n').parse(input).unwrap();
     assert_eq!(input.location, 1);
-    assert_eq!(input.s, "ull");
-    assert_eq!(output, 'n');
+    assert_eq!(input.s, "üll");
+    assert_eq!(output, Span::new(0..1));
 
-    let (input, output) = CharParser('u').parse(input).unwrap();
-    assert_eq!(input.location, 2);
+    let (input, output) = CharParser('ü').parse(input).unwrap();
+    assert_eq!(input.location, 3);
     assert_eq!(input.s, "ll");
-    assert_eq!(output, 'u');
+    assert_eq!(output, Span::new(1..3));
 
     let err = CharParser('a').parse(input).unwrap_err();
-    assert_eq!(err, Error::new(Span::new(2..3)));
+    assert_eq!(err, Error::new(Span::new(3..4)));
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn test_shift_parser() {
 
     assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, ('a', 'b'));
+    assert_eq!(output, (Span::new(0..1), Span::new(2..3)));
 
     let (rest, output) = (CharParser('a').c() + (Ws.c() >> CharParser('b')))
         .parse(input)
@@ -90,7 +90,7 @@ fn test_shift_parser() {
 
     assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, ('a', 'b'));
+    assert_eq!(output, (Span::new(0..1), Span::new(2..3)));
 
     let input = Input::from_str("big boi!!");
     let (rest, output) = (StrParser("big").c() >> Ws >> StrParser("boi") << StrParser("!"))
@@ -111,7 +111,7 @@ fn test_or_parser() {
         Int(u128),
     }
 
-    let parser = CharParser('c').map(Cases::Char).c()
+    let parser = CharParser('c').map(|_| Cases::Char('c')).c()
         | StrParser("aoeu").map(|_| Cases::Str("aoeu"))
         | IntegerParser { base: 10 }.map(Cases::Int);
 
