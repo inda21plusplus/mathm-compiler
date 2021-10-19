@@ -3,6 +3,7 @@ use parcom::{
     Error, Input, Parser, Span,
 };
 
+#[derive(Debug, Clone, Copy)]
 pub struct IntegerLiteral {
     pub span: Span,
     pub base: u32,
@@ -53,14 +54,3 @@ impl Parser for IntegerLiteralParser {
         ))
     }
 }
-
-// #[derive(Debug, Clone, Copy)]
-// pub struct FloatParser;
-
-// impl Parser for FloatParser {
-//     type Output = f64;
-
-//     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
-//         todo!("{:?}", input)
-//     }
-// }
