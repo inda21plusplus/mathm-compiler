@@ -26,13 +26,13 @@ fn test_string_parser() {
     let (input, output) = StrParser("null").parse(input).unwrap();
     assert_eq!(input.location, 4);
     assert_eq!(input.s, "");
-    assert_eq!(output, "null");
+    assert_eq!(output, Span::new(0..4));
 
     let input = Input::from_str("nullable");
     let (rest, output) = StrParser("null").parse(input).unwrap();
     assert_eq!(rest.location, 4);
     assert_eq!(rest.s, "able");
-    assert_eq!(output, "null");
+    assert_eq!(output, Span::new(0..4));
 
     let input = Input::from_str("nil");
     let err = StrParser("null").parse(input).unwrap_err();
@@ -58,7 +58,10 @@ fn test_add_parser() {
 
     assert_eq!(rest.location, input.s.len());
     assert_eq!(rest.s, "");
-    assert_eq!(output, (("very", Span::new(4..5)), "true"));
+    assert_eq!(
+        output,
+        ((Span::new(0..4), Span::new(4..5)), Span::new(5..9))
+    );
 
     let input = Input::from_str("verytrue");
     let (rest, output) = (StrParser("very").c() + StrParser("true"))
@@ -67,7 +70,7 @@ fn test_add_parser() {
 
     assert_eq!(rest.location, 8);
     assert_eq!(rest.s, "");
-    assert_eq!(output, ("very", "true"));
+    assert_eq!(output, (Span::new(0..4), Span::new(4..8)));
 }
 
 #[test]
@@ -96,7 +99,7 @@ fn test_shift_parser() {
 
     assert_eq!(rest.location, 8);
     assert_eq!(rest.s, "!");
-    assert_eq!(output, "boi");
+    assert_eq!(output, Span::new(4..7));
 }
 
 #[test]
@@ -109,7 +112,7 @@ fn test_or_parser() {
     }
 
     let parser = CharParser('c').map(Cases::Char).c()
-        | StrParser("aoeu").map(Cases::Str)
+        | StrParser("aoeu").map(|_| Cases::Str("aoeu"))
         | IntegerParser { base: 10 }.map(Cases::Int);
 
     let input = Input::from_str("c");

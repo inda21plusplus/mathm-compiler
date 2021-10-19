@@ -22,14 +22,15 @@ impl Parser for CharParser {
 pub struct StrParser<'s>(pub &'s str);
 
 impl<'s> Parser for StrParser<'s> {
-    type Output = &'s str;
+    type Output = Span;
 
     fn parse<'i>(self, mut input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        let start = input.location;
         for parser in self.0.chars().map(CharParser) {
             input = parser.parse(input)?.0;
         }
 
-        Ok((input, self.0))
+        Ok((input, Span::new(start..input.location)))
     }
 }
 
