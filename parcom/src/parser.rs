@@ -1,5 +1,7 @@
 use crate::{
-    combinators::{MapParser, OptionalParser, ParserCombinator, TryMapParser, WhenParser},
+    combinators::{
+        MapParser, OptionalParser, ParserCombinator, SepByParser, TryMapParser, WhenParser,
+    },
     Error, Input,
 };
 
@@ -17,19 +19,18 @@ pub trait Parser {
         ParserCombinator(self)
     }
 
-    fn map<T, F: FnOnce(Self::Output) -> T>(self, f: F) -> MapParser<Self, T, F>
+    fn map<T, F>(self, f: F) -> MapParser<Self, T, F>
     where
         Self: Sized,
+        F: FnOnce(Self::Output) -> T,
     {
         MapParser(self, f)
     }
 
-    fn try_map<T, F: FnOnce(Self::Output) -> Result<T, Error>>(
-        self,
-        f: F,
-    ) -> TryMapParser<Self, T, F>
+    fn try_map<T, F>(self, f: F) -> TryMapParser<Self, T, F>
     where
         Self: Sized,
+        F: FnOnce(Self::Output) -> Result<T, Error>,
     {
         TryMapParser(self, f)
     }
@@ -46,5 +47,16 @@ pub trait Parser {
         Self: Sized,
     {
         WhenParser(self, when)
+    }
+
+    fn sep_by<S>(self, separator: S) -> SepByParser<Self, S>
+    where
+        Self: Sized + Clone,
+        S: Parser + Clone,
+    {
+        SepByParser {
+            parser: self,
+            separator,
+        }
     }
 }

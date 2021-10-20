@@ -175,3 +175,29 @@ impl<P: Parser> Parser for WhenParser<P> {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct SepByParser<P: Parser, S: Parser> {
+    pub parser: P,
+    pub separator: S,
+}
+
+impl<P: Parser + Clone, S: Parser + Clone> Parser for SepByParser<P, S> {
+    type Output = Vec<P::Output>;
+
+    fn parse<'i>(self, mut input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        let mut elements = vec![];
+
+        while let Ok((rest, element)) = self.parser.clone().parse(input) {
+            input = rest;
+            elements.push(element);
+            if let Ok((rest, _)) = self.separator.clone().parse(input) {
+                input = rest;
+            } else {
+                break;
+            }
+        }
+
+        Ok((input, elements))
+    }
+}

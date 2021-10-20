@@ -212,3 +212,25 @@ fn test_when_parser() {
 
     assert_eq!(output, "str");
 }
+
+#[test]
+fn test_sep_by_parser() {
+    let parser = CharParser('[').c()
+        >> Ws
+        >> IntegerParser { base: 10 }.sep_by(Ws.c() + CharParser(',') + Ws)
+        << Ws
+        << CharParser(']');
+    let input = Input::from_str("[1, 2, 3, 4, 5]");
+    let (rest, output) = parser.parse(input).unwrap();
+
+    assert_eq!(rest.location, input.s.len());
+    assert_eq!(rest.s, "");
+    assert_eq!(output, vec![1, 2, 3, 4, 5]);
+
+    let input = Input::from_str("[]");
+    let (rest, output) = parser.parse(input).unwrap();
+
+    assert_eq!(rest.location, input.s.len());
+    assert_eq!(rest.s, "");
+    assert_eq!(output, []);
+}
