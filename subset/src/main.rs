@@ -1,7 +1,6 @@
-#![feature(stdin_forwarders)]
+#![feature(stdin_forwarders, box_patterns)]
 
 mod error;
-mod get_span;
 mod parsing;
 
 #[cfg(test)]
@@ -23,7 +22,7 @@ fn main() {
         };
 
         let input = Input::from_str(&line);
-        match parsing::Expr::parser(0).parse(input) {
+        match parsing::Stmt::parser().parse(input) {
             Ok((Input { s: "", .. }, output)) => println!("{:#?}", output),
             Ok((Input { location, .. }, _)) => println!("Expected end of input at {}..", location),
             Err(err) => println!("Parsing error at {}", err.at),
