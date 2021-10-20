@@ -1,11 +1,17 @@
 use parcom::{
-    parsers::{CharParser, PredicateParser, SpanParser, StrParser, Ws},
+    parsers::{CharParser, StrParser, Ws},
     Error, Input, Parser, Span,
 };
 
-use super::number::{IntegerLiteral, IntegerLiteralParser};
-use super::string::{StringLiteral, StringLiteralParser};
 use super::Stmt;
+use super::{
+    number::{IntegerLiteral, IntegerLiteralParser},
+    IdentifierParser,
+};
+use super::{
+    string::{StringLiteral, StringLiteralParser},
+    Identifier,
+};
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -16,8 +22,9 @@ pub enum Expr {
     BinaryOperation(BinaryOperation),
     Constuction(Constuction),
     Block(Block),
-    // If(IfExpr),
-    // Loop(LoopExpr),
+    If(If),
+    Loop(Loop),
+    Break(Break),
     // // Cast(Cast),
     // // // Closure(Closure),
 }
@@ -44,10 +51,13 @@ impl Expr {
             | ConstuctionParenParser.map(Self::Constuction)
             | SuffixParser.when(precedence_level < precedence_levels::SUFFIX)
             | BlockParser.map(Self::Block)
+            | IfParser.map(Self::If)
+            | LoopParser.map(Self::Loop)
+            | BreakParser.map(Self::Break)
             | Literal::parser().map(Self::Literal)
             | IdentifierParser.map(Self::Ident)
     }
-    fn span(&self) -> Span {
+    pub fn span(&self) -> Span {
         match self {
             Self::Literal(l) => l.span(),
             Self::Ident(i) => i.span,
@@ -56,6 +66,9 @@ impl Expr {
             Self::BinaryOperation(b) => b.span,
             Self::Constuction(c) => c.span,
             Self::Block(b) => b.span,
+            Self::If(i) => i.span,
+            Self::Loop(l) => l.span,
+            Self::Break(b) => b.span,
         }
     }
 }
@@ -106,31 +119,6 @@ pub struct NullLiteral {
 impl NullLiteral {
     pub fn parser() -> impl Parser<Output = Self> + Clone {
         StrParser("null").map(|span| Self { span })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Identifier {
-    pub span: Span,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct IdentifierParser;
-
-impl Parser for IdentifierParser {
-    type Output = Identifier;
-
-    fn parse<'i>(self, original_input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
-        let (mut input, mut span) = PredicateParser(char::is_alphabetic).parse(original_input)?;
-        let mut name = original_input[span].to_string();
-        while let Ok((rest, char_span)) = PredicateParser(char::is_alphanumeric).parse(input) {
-            input = rest;
-            span = span.merge(char_span);
-            name.push_str(&original_input[char_span]);
-        }
-
-        Ok((input, Identifier { span, name }))
     }
 }
 
@@ -357,8 +345,8 @@ impl ConstructionParameter {
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    span: Span,
-    stmts: Vec<Stmt>,
+    pub span: Span,
+    pub stmts: Vec<Stmt>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -369,7 +357,8 @@ impl Parser for BlockParser {
 
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
         let (input, ((lb_s, stmts), rb_s)) =
-            (CharParser('{').c() + Stmt::parser().sep_by(Ws) + CharParser('}')).parse(input)?;
+            ((CharParser('{').c() << Ws) + Stmt::parser().sep_by(Ws) + (Ws.c() >> CharParser('}')))
+                .parse(input)?;
         Ok((
             input,
             Block {
@@ -377,5 +366,78 @@ impl Parser for BlockParser {
                 stmts,
             },
         ))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct If {
+    pub span: Span,
+    pub condition: Box<Expr>,
+    pub true_expr: Box<Expr>,
+    pub else_expr: Option<Box<Expr>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IfParser;
+
+impl Parser for IfParser {
+    type Output = If;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        ((StrParser("if").c() << Ws)
+            + (Expr::parser(0).map(Box::new).c() << Ws)
+            + (Expr::parser(0).map(Box::new).c() << Ws)
+            + (StrParser("else").c() >> Ws >> Expr::parser(0).map(Box::new)).optional())
+        .map(|(((if_span, condition), true_expr), else_expr)| If {
+            span: if_span.merge(else_expr.as_ref().map_or(true_expr.span(), |eb| eb.span())),
+            condition,
+            true_expr,
+            else_expr,
+        })
+        .parse(input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Loop {
+    pub span: Span,
+    pub block: Block,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LoopParser;
+
+impl Parser for LoopParser {
+    type Output = Loop;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        ((StrParser("loop").c() << Ws) + BlockParser)
+            .map(|(loop_span, block)| Loop {
+                span: loop_span.merge(block.span),
+                block,
+            })
+            .parse(input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Break {
+    pub span: Span,
+    pub value: Box<Expr>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BreakParser;
+
+impl Parser for BreakParser {
+    type Output = Break;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        ((StrParser("break").c() << Ws) + Expr::parser(0).map(Box::new))
+            .map(|(break_span, value)| Break {
+                span: break_span.merge(value.span()),
+                value,
+            })
+            .parse(input)
     }
 }
