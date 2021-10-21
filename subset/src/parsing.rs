@@ -2,6 +2,7 @@ mod expr;
 mod number;
 mod stmt;
 mod string;
+mod type_;
 
 use parcom::{parsers::PredicateParser, Error, Input, Parser, Span};
 pub use stmt::Stmt;

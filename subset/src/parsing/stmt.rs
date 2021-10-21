@@ -3,7 +3,11 @@ use parcom::{
     Parser, Span,
 };
 
-use super::{expr::Expr, Identifier, IdentifierParser};
+use super::{
+    expr::Expr,
+    type_::{Type, TypeParser},
+    Identifier, IdentifierParser,
+};
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
@@ -24,6 +28,7 @@ impl Stmt {
 pub struct VarDeclaration {
     pub span: Span,
     pub ident: Identifier,
+    pub type_: Option<Type>,
     pub value: Expr,
 }
 
@@ -37,13 +42,15 @@ impl Parser for VarDeclParser {
         self,
         input: parcom::Input<'i>,
     ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
-        ((IdentifierParser.c() << Ws << StrParser("<-") << Ws) + Expr::parser(0))
-            .map(|(ident, value)| VarDeclaration {
-                span: ident.span.merge(value.span()),
-                ident,
-                value,
-            })
-            .parse(input)
+        ((((IdentifierParser.c() << Ws) + TypeParser.optional()) << Ws << StrParser("<-") << Ws)
+            + Expr::parser(0))
+        .map(|((ident, type_), value)| VarDeclaration {
+            span: ident.span.merge(value.span()),
+            ident,
+            type_,
+            value,
+        })
+        .parse(input)
     }
 }
 

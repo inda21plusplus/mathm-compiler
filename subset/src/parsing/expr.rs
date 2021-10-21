@@ -3,15 +3,16 @@ use parcom::{
     Error, Input, Parser, Span,
 };
 
-use super::Stmt;
 use super::{
     number::{IntegerLiteral, IntegerLiteralParser},
+    type_::TypeParser,
     IdentifierParser,
 };
 use super::{
     string::{StringLiteral, StringLiteralParser},
     Identifier,
 };
+use super::{type_::Type, Stmt};
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -26,8 +27,8 @@ pub enum Expr {
     Loop(Loop),
     Break(Break),
     Return(Return),
+    Function(Function),
     // // Cast(Cast),
-    // // // Closure(Closure),
 }
 
 mod precedence_levels {
@@ -56,6 +57,7 @@ impl Expr {
             | LoopParser.map(Self::Loop)
             | BreakParser.map(Self::Break)
             | ReturnParser.map(Self::Return)
+            | FunctionParser.map(Self::Function)
             | Literal::parser().map(Self::Literal)
             | IdentifierParser.map(Self::Ident)
     }
@@ -72,6 +74,7 @@ impl Expr {
             Self::Loop(l) => l.span,
             Self::Break(b) => b.span,
             Self::Return(r) => r.span,
+            Self::Function(f) => f.span,
         }
     }
 }
@@ -462,6 +465,64 @@ impl Parser for ReturnParser {
             .map(|(break_span, value)| Return {
                 span: break_span.merge(value.span()),
                 value,
+            })
+            .parse(input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub span: Span,
+    pub params: Vec<FunctionParameter>,
+    pub return_type: Type,
+    pub body: Box<Expr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionParameter {
+    pub span: Span,
+    pub ident: Identifier,
+    pub type_: Type, // todo: make optional
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FunctionParser;
+
+impl Parser for FunctionParser {
+    type Output = Function;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        ((StrParser("fn").c() << Ws << CharParser('(') << Ws)
+            + (FunctionParameterParser
+                .sep_by(Ws.c() + CharParser(',') + Ws)
+                .c()
+                << Ws
+                << CharParser(')')
+                << Ws)
+            + (TypeParser.c() << Ws << StrParser("=>") << Ws)
+            + Expr::parser(0).map(Box::new))
+        .map(|(((fn_span, params), return_type), body)| Function {
+            span: fn_span.merge(body.span()),
+            params,
+            return_type,
+            body,
+        })
+        .parse(input)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FunctionParameterParser;
+
+impl Parser for FunctionParameterParser {
+    type Output = FunctionParameter;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        ((IdentifierParser.c() << Ws) + TypeParser)
+            .map(|(ident, type_)| FunctionParameter {
+                span: ident.span.merge(type_.span()),
+                ident,
+                type_,
             })
             .parse(input)
     }
