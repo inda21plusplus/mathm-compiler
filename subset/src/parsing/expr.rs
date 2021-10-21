@@ -25,6 +25,7 @@ pub enum Expr {
     If(If),
     Loop(Loop),
     Break(Break),
+    Return(Return),
     // // Cast(Cast),
     // // // Closure(Closure),
 }
@@ -54,6 +55,7 @@ impl Expr {
             | IfParser.map(Self::If)
             | LoopParser.map(Self::Loop)
             | BreakParser.map(Self::Break)
+            | ReturnParser.map(Self::Return)
             | Literal::parser().map(Self::Literal)
             | IdentifierParser.map(Self::Ident)
     }
@@ -69,6 +71,7 @@ impl Expr {
             Self::If(i) => i.span,
             Self::Loop(l) => l.span,
             Self::Break(b) => b.span,
+            Self::Return(r) => r.span,
         }
     }
 }
@@ -435,6 +438,28 @@ impl Parser for BreakParser {
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
         ((StrParser("break").c() << Ws) + Expr::parser(0).map(Box::new))
             .map(|(break_span, value)| Break {
+                span: break_span.merge(value.span()),
+                value,
+            })
+            .parse(input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Return {
+    pub span: Span,
+    pub value: Box<Expr>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ReturnParser;
+
+impl Parser for ReturnParser {
+    type Output = Return;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        ((StrParser("return").c() << Ws) + Expr::parser(0).map(Box::new))
+            .map(|(break_span, value)| Return {
                 span: break_span.merge(value.span()),
                 value,
             })
