@@ -29,7 +29,7 @@ impl Parser for StringLiteralParser {
     // todo: support r"\"
     // todo: support r_" " "_
     // todo: support c"null-terminated, and maybe inoperable with c-style strings or whatever"
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let start = input.location;
         let (mut input, _) = CharParser('"').parse(input)?;
 

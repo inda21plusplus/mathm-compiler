@@ -145,7 +145,7 @@ pub struct UnaryOperationParser;
 impl Parser for UnaryOperationParser {
     type Output = UnaryOperation;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         ((CharParser('-')
             .map(|span| (span, UnaryOperatorKind::Neg))
             .c()
@@ -213,7 +213,7 @@ pub struct BinaryOperationParser(pub usize);
 impl Parser for BinaryOperationParser {
     type Output = Expr;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (mut input, mut expr) = Expr::parser(precedence_levels::UNARY_OPERATION)
             .map(Box::new)
             .parse(input)?;
@@ -264,7 +264,7 @@ pub struct SuffixParser;
 impl Parser for SuffixParser {
     type Output = Expr;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (mut input, mut left) = Expr::parser(precedence_levels::SUFFIX)
             .map(Box::new)
             .parse(input)?;
@@ -301,7 +301,7 @@ struct ConstuctionParenParser;
 impl Parser for ConstuctionParenParser {
     type Output = Constuction;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         ((CharParser('(').c()
             + (Ws.c()
                 >> (ConstructionParameter::parser()
@@ -347,7 +347,7 @@ pub struct BlockParser;
 impl Parser for BlockParser {
     type Output = Block;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (input, ((lb_s, stmts), rb_s)) =
             ((CharParser('{').c() << Ws) + Stmt::parser().sep_by(Ws) + (Ws.c() >> CharParser('}')))
                 .parse(input)?;
@@ -375,7 +375,7 @@ pub struct IfParser;
 impl Parser for IfParser {
     type Output = If;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         ((StrParser("if").c() << Ws)
             + (Expr::parser(0).map(Box::new).c() << Ws)
             + (BlockParser.c() << Ws)
@@ -402,7 +402,7 @@ pub struct LoopParser;
 impl Parser for LoopParser {
     type Output = Loop;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         ((StrParser("loop").c() << Ws) + BlockParser)
             .map(|(loop_span, block)| Loop {
                 span: loop_span.merge(block.span),
@@ -424,7 +424,7 @@ pub struct BreakParser;
 impl Parser for BreakParser {
     type Output = Break;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         ((StrParser("break").c() << Ws) + Expr::parser(0).map(Box::new))
             .map(|(break_span, value)| Break {
                 span: break_span.merge(value.span()),
@@ -446,7 +446,7 @@ pub struct ReturnParser;
 impl Parser for ReturnParser {
     type Output = Return;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         ((StrParser("return").c() << Ws) + Expr::parser(0).map(Box::new))
             .map(|(break_span, value)| Return {
                 span: break_span.merge(value.span()),

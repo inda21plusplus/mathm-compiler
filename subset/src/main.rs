@@ -21,7 +21,7 @@ fn main() {
             None => break,
         };
 
-        let input = Input::from_str(&line);
+        let input = Input::new(&line);
         match parsing::Stmt::parser().parse(input) {
             Ok((Input { s: "", .. }, output)) => println!("{:#?}", output),
             Ok((Input { location, .. }, _)) => println!("Expected end of input at {}..", location),

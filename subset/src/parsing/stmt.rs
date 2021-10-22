@@ -42,14 +42,10 @@ pub struct LetParser;
 impl Parser for LetParser {
     type Output = Let;
 
-    fn parse<'i>(
-        self,
-        input: parcom::Input<'i>,
-    ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
-        ((((StrParser("let").c() + IdentifierParser << Ws) + TypeParser)
-            << Ws
-            << StrParser("=")
-            << Ws)
+    fn parse(self, input: parcom::Input) -> Result<(parcom::Input, Self::Output), parcom::Error> {
+        ((StrParser("let").c() << Ws)
+            + (IdentifierParser.c() << Ws)
+            + (TypeParser.c() << Ws << StrParser("=") << Ws)
             + Expr::parser(0))
         .map(|(((let_span, ident), type_), value)| Let {
             span: let_span.merge(value.span()),
@@ -74,10 +70,7 @@ pub struct AssignmentParser;
 impl Parser for AssignmentParser {
     type Output = Assignment;
 
-    fn parse<'i>(
-        self,
-        input: parcom::Input<'i>,
-    ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
+    fn parse(self, input: parcom::Input) -> Result<(parcom::Input, Self::Output), parcom::Error> {
         ((Expr::parser(0).c() << Ws << StrParser("=") << Ws) + Expr::parser(0))
             .map(|(left, value)| Assignment {
                 span: left.span().merge(value.span()),
@@ -103,7 +96,7 @@ pub struct FunctionParser;
 impl Parser for FunctionParser {
     type Output = Function;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         ((((StrParser("fn").c() << Ws) + IdentifierParser + StructParser) << Ws)
             + (TypeParser.c() << Ws)
             + BlockParser)

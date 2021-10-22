@@ -17,7 +17,7 @@ pub struct IntegerLiteralParser;
 impl Parser for IntegerLiteralParser {
     type Output = IntegerLiteral;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let start = input.location;
 
         let prefix_parser = (CharParser('0').c()
@@ -42,7 +42,7 @@ impl Parser for IntegerLiteralParser {
         let value = value
             * (base as u128)
                 .checked_pow(exponent as u32)
-                .ok_or(Error::new(Span::new(start..input.location)))?;
+                .ok_or_else(|| Error::new(Span::new(start..input.location)))?;
 
         if input.next().map(|(_, next_char)| next_char.is_alphabetic()) == Some(true) {
             return Err(Error::new(Span::first(&input)));

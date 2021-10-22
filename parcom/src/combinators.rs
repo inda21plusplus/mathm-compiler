@@ -8,7 +8,7 @@ pub struct ParserCombinator<P: Parser>(pub P);
 impl<P: Parser> Parser for ParserCombinator<P> {
     type Output = P::Output;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         self.0.parse(input)
     }
 }
@@ -67,7 +67,7 @@ pub struct RightParser<A: Parser, B: Parser>(pub A, pub B);
 impl<O, L: Parser<Output = O>, R: Parser<Output = O>> Parser for OrParser<O, L, R> {
     type Output = O;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let err0 = match self.0.parse(input) {
             Ok(output) => return Ok(output),
             Err(err) => err,
@@ -83,7 +83,7 @@ impl<O, L: Parser<Output = O>, R: Parser<Output = O>> Parser for OrParser<O, L, 
 impl<A: Parser, B: Parser> Parser for AndParser<A, B> {
     type Output = (A::Output, B::Output);
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (input, a) = self.0.parse(input)?;
         let (input, b) = self.1.parse(input)?;
 
@@ -94,7 +94,7 @@ impl<A: Parser, B: Parser> Parser for AndParser<A, B> {
 impl<L: Parser, R: Parser> Parser for LeftParser<L, R> {
     type Output = L::Output;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (input, output) = self.0.parse(input)?;
         let (input, _) = self.1.parse(input)?;
 
@@ -105,7 +105,7 @@ impl<L: Parser, R: Parser> Parser for LeftParser<L, R> {
 impl<L: Parser, R: Parser> Parser for RightParser<L, R> {
     type Output = R::Output;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (input, _) = self.0.parse(input)?;
         let (input, output) = self.1.parse(input)?;
 
@@ -118,7 +118,7 @@ pub struct PureParser<T>(pub T);
 impl<T> Parser for PureParser<T> {
     type Output = T;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         Ok((input, self.0))
     }
 }
@@ -129,7 +129,7 @@ pub struct MapParser<P: Parser, T, F: FnOnce(P::Output) -> T>(pub P, pub F);
 impl<P: Parser, T, F: FnOnce(P::Output) -> T> Parser for MapParser<P, T, F> {
     type Output = T;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (rest, output) = self.0.parse(input)?;
         Ok((rest, self.1(output)))
     }
@@ -141,7 +141,7 @@ pub struct TryMapParser<P: Parser, T, F: FnOnce(P::Output) -> Result<T, Error>>(
 impl<P: Parser, T, F: FnOnce(P::Output) -> Result<T, Error>> Parser for TryMapParser<P, T, F> {
     type Output = T;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (rest, output) = self.0.parse(input)?;
         Ok((rest, self.1(output)?))
     }
@@ -153,7 +153,7 @@ pub struct OptionalParser<P: Parser>(pub P);
 impl<P: Parser> Parser for OptionalParser<P> {
     type Output = Option<P::Output>;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         match self.0.parse(input) {
             Ok((rest, output)) => Ok((rest, Some(output))),
             Err(_) => Ok((input, None)),
@@ -167,7 +167,7 @@ pub struct WhenParser<P: Parser>(pub P, pub bool);
 impl<P: Parser> Parser for WhenParser<P> {
     type Output = P::Output;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         if !self.1 {
             Err(Error::new(Span::first(&input)))
         } else {
@@ -185,7 +185,7 @@ pub struct SepByParser<P: Parser, S: Parser> {
 impl<P: Parser + Clone, S: Parser + Clone> Parser for SepByParser<P, S> {
     type Output = Vec<P::Output>;
 
-    fn parse<'i>(self, mut input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+    fn parse(self, mut input: Input) -> Result<(Input, Self::Output), Error> {
         let mut elements = vec![];
 
         while let Ok((rest, element)) = self.parser.clone().parse(input) {

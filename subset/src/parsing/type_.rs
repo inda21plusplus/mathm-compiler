@@ -32,10 +32,7 @@ pub struct TypeParser;
 impl Parser for TypeParser {
     type Output = Type;
 
-    fn parse<'i>(
-        self,
-        input: parcom::Input<'i>,
-    ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
+    fn parse(self, input: parcom::Input) -> Result<(parcom::Input, Self::Output), parcom::Error> {
         let (mut input, mut type_) = (IdentifierParser.map(Type::Named).c()
             | ReferenceParser.map(Type::Reference)
             | StructParser.map(Type::Struct))
@@ -78,10 +75,7 @@ pub struct ReferenceParser;
 impl Parser for ReferenceParser {
     type Output = Reference;
 
-    fn parse<'i>(
-        self,
-        input: parcom::Input<'i>,
-    ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
+    fn parse(self, input: parcom::Input) -> Result<(parcom::Input, Self::Output), parcom::Error> {
         (CharParser('&').c() + TypeParser.map(Box::new))
             .map(|(amp_span, to)| Reference {
                 span: amp_span.merge(to.span()),
@@ -110,10 +104,7 @@ pub struct StructParser;
 impl Parser for StructParser {
     type Output = Struct;
 
-    fn parse<'i>(
-        self,
-        input: parcom::Input<'i>,
-    ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
+    fn parse(self, input: parcom::Input) -> Result<(parcom::Input, Self::Output), parcom::Error> {
         ((CharParser('(').c() << Ws)
             + StructTypeParser.sep_by(Ws.c() + CharParser(',') + Ws)
             + (Ws.c() >> CharParser(')')))
@@ -131,10 +122,7 @@ pub struct StructTypeParser;
 impl Parser for StructTypeParser {
     type Output = StructType;
 
-    fn parse<'i>(
-        self,
-        input: parcom::Input<'i>,
-    ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
+    fn parse(self, input: parcom::Input) -> Result<(parcom::Input, Self::Output), parcom::Error> {
         ((IdentifierParser.map(Some).c() + (Ws.c() >> TypeParser)).c()
             | TypeParser.map(|t| (None, t)))
         .map(|(key, type_)| StructType {

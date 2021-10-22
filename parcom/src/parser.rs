@@ -8,7 +8,7 @@ use crate::{
 pub trait Parser {
     type Output;
 
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error>;
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error>;
 
     /// Because of orphan rules, operators cannot be implemented for any `Parser`, so this must be
     /// used to wrap Parsers in a `ParserCombinator`
