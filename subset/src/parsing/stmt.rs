@@ -1,51 +1,58 @@
 use parcom::{
     parsers::{StrParser, Ws},
-    Parser, Span,
+    Error, Input, Parser, Span,
 };
 
 use super::{
-    expr::Expr,
-    type_::{Type, TypeParser},
+    expr::{Block, BlockParser, Expr},
+    type_::{Struct, StructParser, Type, TypeParser},
     Identifier, IdentifierParser,
 };
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Expr(Expr),
-    VarDecl(VarDeclaration),
+    Let(Let),
+    TypeDecl(TypeDecl),
     Assign(Assignment),
+    Function(Function),
 }
 
 impl Stmt {
     pub fn parser() -> impl Parser<Output = Self> + Clone {
-        VarDeclParser.map(Self::VarDecl).c()
+        LetParser.map(Self::Let).c()
+            | FunctionParser.map(Self::Function)
+            | TypeDecl::parser().map(Self::TypeDecl)
             | AssignmentParser.map(Self::Assign)
             | Expr::parser(0).map(Self::Expr)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct VarDeclaration {
+pub struct Let {
     pub span: Span,
     pub ident: Identifier,
-    pub type_: Option<Type>,
+    pub type_: Type, // todo: make optional
     pub value: Expr,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct VarDeclParser;
+pub struct LetParser;
 
-impl Parser for VarDeclParser {
-    type Output = VarDeclaration;
+impl Parser for LetParser {
+    type Output = Let;
 
     fn parse<'i>(
         self,
         input: parcom::Input<'i>,
     ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
-        ((((IdentifierParser.c() << Ws) + TypeParser.optional()) << Ws << StrParser("<-") << Ws)
+        ((((StrParser("let").c() + IdentifierParser << Ws) + TypeParser)
+            << Ws
+            << StrParser("=")
+            << Ws)
             + Expr::parser(0))
-        .map(|((ident, type_), value)| VarDeclaration {
-            span: ident.span.merge(value.span()),
+        .map(|(((let_span, ident), type_), value)| Let {
+            span: let_span.merge(value.span()),
             ident,
             type_,
             value,
@@ -71,12 +78,63 @@ impl Parser for AssignmentParser {
         self,
         input: parcom::Input<'i>,
     ) -> Result<(parcom::Input<'i>, Self::Output), parcom::Error> {
-        ((Expr::parser(0).c() << Ws << StrParser(":=") << Ws) + Expr::parser(0))
+        ((Expr::parser(0).c() << Ws << StrParser("=") << Ws) + Expr::parser(0))
             .map(|(left, value)| Assignment {
                 span: left.span().merge(value.span()),
                 left,
                 value,
             })
             .parse(input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub span: Span,
+    pub ident: Identifier,
+    pub params: Struct,
+    pub return_type: Type,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FunctionParser;
+
+impl Parser for FunctionParser {
+    type Output = Function;
+
+    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
+        ((((StrParser("fn").c() << Ws) + IdentifierParser + StructParser) << Ws)
+            + (TypeParser.c() << Ws)
+            + BlockParser)
+            .map(
+                |((((fn_span, ident), params), return_type), body)| Function {
+                    span: fn_span.merge(body.span),
+                    ident,
+                    params,
+                    return_type,
+                    body,
+                },
+            )
+            .parse(input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeDecl {
+    pub span: Span,
+    pub ident: Identifier,
+    pub type_: Type,
+}
+
+impl TypeDecl {
+    pub fn parser() -> impl Parser<Output = Self> + Clone {
+        ((StrParser("type").c() << Ws) + (IdentifierParser.c() << Ws) + TypeParser).map(
+            |((type_span, ident), type_)| TypeDecl {
+                span: type_span.merge(type_.span()),
+                ident,
+                type_,
+            },
+        )
     }
 }

@@ -69,6 +69,7 @@ pub struct DotAccessParser;
 pub struct Reference {
     pub span: Span,
     pub to: Box<Type>,
+    // todo: add optional, owned, maybe more
 }
 
 #[derive(Debug, Clone, Copy)]

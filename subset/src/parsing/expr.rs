@@ -3,16 +3,15 @@ use parcom::{
     Error, Input, Parser, Span,
 };
 
+use super::Stmt;
 use super::{
     number::{IntegerLiteral, IntegerLiteralParser},
-    type_::TypeParser,
     IdentifierParser,
 };
 use super::{
     string::{StringLiteral, StringLiteralParser},
     Identifier,
 };
-use super::{type_::Type, Stmt};
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -27,7 +26,6 @@ pub enum Expr {
     Loop(Loop),
     Break(Break),
     Return(Return),
-    Function(Function),
     // // Cast(Cast),
 }
 
@@ -57,7 +55,6 @@ impl Expr {
             | LoopParser.map(Self::Loop)
             | BreakParser.map(Self::Break)
             | ReturnParser.map(Self::Return)
-            | FunctionParser.map(Self::Function)
             | Literal::parser().map(Self::Literal)
             | IdentifierParser.map(Self::Ident)
     }
@@ -74,7 +71,6 @@ impl Expr {
             Self::Loop(l) => l.span,
             Self::Break(b) => b.span,
             Self::Return(r) => r.span,
-            Self::Function(f) => f.span,
         }
     }
 }
@@ -150,10 +146,10 @@ impl Parser for UnaryOperationParser {
     type Output = UnaryOperation;
 
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
-        ((CharParser('¯')
+        ((CharParser('-')
             .map(|span| (span, UnaryOperatorKind::Neg))
             .c()
-            | CharParser('¬').map(|span| (span, UnaryOperatorKind::Not))
+            | StrParser("not ").map(|span| (span, UnaryOperatorKind::Not))
             | CharParser('&').map(|span| (span, UnaryOperatorKind::Ref))
             | CharParser('*').map(|span| (span, UnaryOperatorKind::Deref)))
             + Expr::parser(precedence_levels::UNARY_OPERATION).map(Box::new))
@@ -186,17 +182,17 @@ impl BinaryOperatorKind {
     fn parser() -> impl Parser<Output = Self> {
         CharParser('+').map(|_| Self::Add).c()
             | CharParser('-').map(|_| Self::Sub)
-            | CharParser('×').map(|_| Self::Mul)
+            | CharParser('*').map(|_| Self::Mul)
             | CharParser('/').map(|_| Self::Div)
             | CharParser('%').map(|_| Self::Mod)
-            | CharParser('∧').map(|_| Self::And)
-            | CharParser('∨').map(|_| Self::Or)
-            | CharParser('=').map(|_| Self::Eq)
-            | CharParser('≠').map(|_| Self::Neq)
+            | StrParser("and").map(|_| Self::And)
+            | StrParser("or").map(|_| Self::Or)
+            | StrParser("==").map(|_| Self::Eq)
+            | StrParser("!=").map(|_| Self::Neq)
             | CharParser('<').map(|_| Self::Lt)
-            | CharParser('≤').map(|_| Self::Leq)
+            | StrParser("<=").map(|_| Self::Leq)
             | CharParser('>').map(|_| Self::Gt)
-            | CharParser('≥').map(|_| Self::Geq)
+            | StrParser(">=").map(|_| Self::Geq)
     }
     fn precedence_level(&self) -> usize {
         use BinaryOperatorKind::*;
@@ -249,16 +245,6 @@ pub struct DotAccess {
     pub ident: Identifier,
 }
 
-// clamp(val <- input, min <- 0, max <- 1)
-// clamp(input, 0, 1)
-// clamp(<-input, 0, 1)
-// Person(name <- "Mathias", age <- 20)
-// Person("Mathias", 20)
-// Person(<-name, <-age)
-// (rest, expr)
-// (input <- rest, expr)
-// (1 + 2) * 3
-// target(param1, param2)
 #[derive(Debug, Clone)]
 pub struct Constuction {
     pub span: Span,
@@ -333,14 +319,14 @@ impl Parser for ConstuctionParenParser {
 
 impl ConstructionParameter {
     fn parser() -> impl Parser<Output = Self> + Clone {
-        ((IdentifierParser.c() << Ws << StrParser("<-") << Ws) + Expr::parser(0))
+        ((IdentifierParser.c() << Ws << CharParser('=') << Ws) + Expr::parser(0))
             .map(|(key, value)| Self {
                 key: Some(key),
                 value,
             })
             .c()
             | Expr::parser(0).map(|value| Self { key: None, value })
-            | StrParser("<-").c()
+            | CharParser('=').c()
                 >> Ws
                 >> IdentifierParser.map(|key| Self {
                     key: Some(key.clone()),
@@ -379,8 +365,8 @@ impl Parser for BlockParser {
 pub struct If {
     pub span: Span,
     pub condition: Box<Expr>,
-    pub true_expr: Box<Expr>,
-    pub else_expr: Option<Box<Expr>>,
+    pub then: Block,
+    pub elze: Option<Block>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -392,13 +378,13 @@ impl Parser for IfParser {
     fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
         ((StrParser("if").c() << Ws)
             + (Expr::parser(0).map(Box::new).c() << Ws)
-            + (Expr::parser(0).map(Box::new).c() << Ws)
-            + (StrParser("else").c() >> Ws >> Expr::parser(0).map(Box::new)).optional())
-        .map(|(((if_span, condition), true_expr), else_expr)| If {
-            span: if_span.merge(else_expr.as_ref().map_or(true_expr.span(), |eb| eb.span())),
+            + (BlockParser.c() << Ws)
+            + (StrParser("else").c() >> Ws >> BlockParser).optional())
+        .map(|(((if_span, condition), then), elze)| If {
+            span: if_span.merge(elze.as_ref().map_or(then.span, |elze| elze.span)),
             condition,
-            true_expr,
-            else_expr,
+            then,
+            elze,
         })
         .parse(input)
     }
@@ -470,60 +456,16 @@ impl Parser for ReturnParser {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Function {
-    pub span: Span,
-    pub params: Vec<FunctionParameter>,
-    pub return_type: Type,
-    pub body: Box<Expr>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FunctionParameter {
-    pub span: Span,
-    pub ident: Identifier,
-    pub type_: Type, // todo: make optional
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct FunctionParser;
-
-impl Parser for FunctionParser {
-    type Output = Function;
-
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
-        ((StrParser("fn").c() << Ws << CharParser('(') << Ws)
-            + (FunctionParameterParser
-                .sep_by(Ws.c() + CharParser(',') + Ws)
-                .c()
-                << Ws
-                << CharParser(')')
-                << Ws)
-            + (TypeParser.c() << Ws << StrParser("=>") << Ws)
-            + Expr::parser(0).map(Box::new))
-        .map(|(((fn_span, params), return_type), body)| Function {
-            span: fn_span.merge(body.span()),
-            params,
-            return_type,
-            body,
-        })
-        .parse(input)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct FunctionParameterParser;
-
-impl Parser for FunctionParameterParser {
-    type Output = FunctionParameter;
-
-    fn parse<'i>(self, input: Input<'i>) -> Result<(Input<'i>, Self::Output), Error> {
-        ((IdentifierParser.c() << Ws) + TypeParser)
-            .map(|(ident, type_)| FunctionParameter {
-                span: ident.span.merge(type_.span()),
-                ident,
-                type_,
-            })
-            .parse(input)
-    }
-}
+// fn fib(n usize) usize {
+//     let a usize = 0;
+//     let b usize = 1;
+//     loop {
+//         let c usize = a + b;
+//         a = b;
+//         b = c;
+//         n = n - 1;
+//         if n == 0 {
+//             break a;
+//         }
+//     }
+// }

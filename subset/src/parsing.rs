@@ -29,7 +29,7 @@ impl Parser for IdentifierParser {
         }
 
         if ["if", "else", "null"].contains(&name.as_ref()) {
-            Err(Error::new(Span::first(&original_input)))
+            Err(Error::new(span))
         } else {
             Ok((input, Identifier { span, name }))
         }
