@@ -349,7 +349,7 @@ impl Parser for BlockParser {
 
     fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (input, ((lb_s, stmts), rb_s)) =
-            ((CharParser('{').c() << Ws) + Stmt::parser().sep_by(Ws) + (Ws.c() >> CharParser('}')))
+            ((CharParser('{').c() << Ws) + Stmt::parser().sep_by(Ws.c() + CharParser(';') + Ws) + (Ws.c() >> CharParser('}')))
                 .parse(input)?;
         Ok((
             input,
