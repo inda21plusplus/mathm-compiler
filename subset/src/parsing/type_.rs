@@ -5,7 +5,7 @@ use parcom::{
 
 use super::{Identifier, IdentifierParser};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Named(Identifier),
     DotAccess(DotAccess),
@@ -52,7 +52,7 @@ impl Parser for TypeParser {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DotAccess {
     pub span: Span,
     pub left: Box<Type>,
@@ -62,7 +62,7 @@ pub struct DotAccess {
 #[derive(Debug, Clone, Copy)]
 pub struct DotAccessParser;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
     pub span: Span,
     pub to: Box<Type>,
@@ -85,13 +85,13 @@ impl Parser for ReferenceParser {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Struct {
     pub span: Span,
     pub types: Vec<StructType>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructType {
     pub span: Span,
     pub key: Option<Identifier>,

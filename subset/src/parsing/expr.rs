@@ -1,3 +1,5 @@
+use core::fmt;
+
 use parcom::{
     parsers::{CharParser, StrParser, Ws},
     Error, Input, Parser, Span,
@@ -20,7 +22,7 @@ pub enum Expr {
     DotAccess(DotAccess),
     UnaryOperation(UnaryOperation),
     BinaryOperation(BinaryOperation),
-    Constuction(Constuction),
+    Construction(Construction),
     Block(Block),
     If(If),
     Loop(Loop),
@@ -48,15 +50,15 @@ impl Expr {
             | UnaryOperationParser
                 .when(precedence_level <= precedence_levels::UNARY_OPERATION)
                 .map(Self::UnaryOperation)
-            | ConstuctionParenParser.map(Self::Constuction)
+            | ConstructionParenParser.map(Self::Construction)
             | SuffixParser.when(precedence_level < precedence_levels::SUFFIX)
             | BlockParser.map(Self::Block)
             | IfParser.map(Self::If)
             | LoopParser.map(Self::Loop)
             | BreakParser.map(Self::Break)
             | ReturnParser.map(Self::Return)
-            | Literal::parser().map(Self::Literal)
             | IdentifierParser.map(Self::Ident)
+            | Literal::parser().map(Self::Literal)
     }
     pub fn span(&self) -> Span {
         match self {
@@ -65,7 +67,7 @@ impl Expr {
             Self::DotAccess(d) => d.span,
             Self::UnaryOperation(u) => u.span,
             Self::BinaryOperation(b) => b.span,
-            Self::Constuction(c) => c.span,
+            Self::Construction(c) => c.span,
             Self::Block(b) => b.span,
             Self::If(i) => i.span,
             Self::Loop(l) => l.span,
@@ -90,7 +92,7 @@ impl Literal {
             | IntegerLiteralParser.map(Self::Integer)
             | StringLiteralParser.map(Self::Str)
     }
-    fn span(&self) -> Span {
+    pub fn span(&self) -> Span {
         match self {
             Self::Bool(b) => b.span,
             Self::Null(n) => n.span,
@@ -149,16 +151,31 @@ impl Parser for UnaryOperationParser {
         ((CharParser('-')
             .map(|span| (span, UnaryOperatorKind::Neg))
             .c()
-            | StrParser("not ").map(|span| (span, UnaryOperatorKind::Not))
+            | StrParser("not").map(|span| (span, UnaryOperatorKind::Not))
             | CharParser('&').map(|span| (span, UnaryOperatorKind::Ref))
             | CharParser('*').map(|span| (span, UnaryOperatorKind::Deref)))
-            + Expr::parser(precedence_levels::UNARY_OPERATION).map(Box::new))
+            + (Ws.c() >> Expr::parser(precedence_levels::UNARY_OPERATION).map(Box::new)))
         .map(|((span, op), expr)| UnaryOperation {
             span: span.merge(expr.span()),
             op,
             expr,
         })
         .parse(input)
+    }
+}
+
+impl fmt::Display for UnaryOperatorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Neg => "-",
+                Self::Not => "!",
+                Self::Ref => "&",
+                Self::Deref => "*",
+            }
+        )
     }
 }
 
@@ -207,6 +224,30 @@ impl BinaryOperatorKind {
     }
 }
 
+impl fmt::Display for BinaryOperatorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Add => "+",
+                Self::Sub => "-",
+                Self::Mul => "*",
+                Self::Div => "/",
+                Self::Mod => "%",
+                Self::And => "and",
+                Self::Or => "or",
+                Self::Eq => "==",
+                Self::Neq => "!=",
+                Self::Lt => "<",
+                Self::Leq => "<=",
+                Self::Gt => ">",
+                Self::Geq => ">=",
+            }
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct BinaryOperationParser(pub usize);
 
@@ -246,7 +287,7 @@ pub struct DotAccess {
 }
 
 #[derive(Debug, Clone)]
-pub struct Constuction {
+pub struct Construction {
     pub span: Span,
     pub left: Option<Box<Expr>>,
     pub params: Vec<ConstructionParameter>,
@@ -270,9 +311,9 @@ impl Parser for SuffixParser {
             .parse(input)?;
 
         loop {
-            if let Ok((rest, constr)) = ConstuctionParenParser.parse(input) {
+            if let Ok((rest, constr)) = ConstructionParenParser.parse(input) {
                 input = rest;
-                left = Box::new(Expr::Constuction(Constuction {
+                left = Box::new(Expr::Construction(Construction {
                     span: left.span().merge(constr.span),
                     left: Some(left),
                     params: constr.params,
@@ -296,10 +337,10 @@ impl Parser for SuffixParser {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ConstuctionParenParser;
+struct ConstructionParenParser;
 
-impl Parser for ConstuctionParenParser {
-    type Output = Constuction;
+impl Parser for ConstructionParenParser {
+    type Output = Construction;
 
     fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         ((CharParser('(').c()
@@ -308,7 +349,7 @@ impl Parser for ConstuctionParenParser {
                     .sep_by(Ws.c() + CharParser(',') + Ws)
                     .c()))
             + (Ws.c() >> CharParser(')')))
-        .map(|((lparen_span, params), rparen_span)| Constuction {
+        .map(|((lparen_span, params), rparen_span)| Construction {
             span: lparen_span.merge(rparen_span),
             left: None,
             params,
@@ -349,7 +390,7 @@ impl Parser for BlockParser {
 
     fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
         let (input, ((lb_s, stmts), rb_s)) =
-            ((CharParser('{').c() << Ws) + Stmt::parser().sep_by(Ws.c() + CharParser(';') + Ws) + (Ws.c() >> CharParser('}')))
+            ((CharParser('{').c() << Ws) + Stmt::parser().sep_by(Ws) + (Ws.c() >> CharParser('}')))
                 .parse(input)?;
         Ok((
             input,
@@ -415,7 +456,7 @@ impl Parser for LoopParser {
 #[derive(Debug, Clone)]
 pub struct Break {
     pub span: Span,
-    pub value: Box<Expr>,
+    pub value: Option<Box<Expr>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -425,9 +466,9 @@ impl Parser for BreakParser {
     type Output = Break;
 
     fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
-        ((StrParser("break").c() << Ws) + Expr::parser(0).map(Box::new))
+        ((StrParser("break").c() << Ws) + Expr::parser(0).map(Box::new).optional())
             .map(|(break_span, value)| Break {
-                span: break_span.merge(value.span()),
+                span: break_span.merge_optional(value.as_ref().map(|e| e.span())),
                 value,
             })
             .parse(input)
@@ -437,7 +478,7 @@ impl Parser for BreakParser {
 #[derive(Debug, Clone)]
 pub struct Return {
     pub span: Span,
-    pub value: Box<Expr>,
+    pub value: Option<Box<Expr>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -447,25 +488,11 @@ impl Parser for ReturnParser {
     type Output = Return;
 
     fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
-        ((StrParser("return").c() << Ws) + Expr::parser(0).map(Box::new))
+        ((StrParser("return").c() << Ws) + Expr::parser(0).map(Box::new).optional())
             .map(|(break_span, value)| Return {
-                span: break_span.merge(value.span()),
+                span: break_span.merge_optional(value.as_ref().map(|e| e.span())),
                 value,
             })
             .parse(input)
     }
 }
-
-// fn fib(n usize) usize {
-//     let a usize = 0;
-//     let b usize = 1;
-//     loop {
-//         let c usize = a + b;
-//         a = b;
-//         b = c;
-//         n = n - 1;
-//         if n == 0 {
-//             break a;
-//         }
-//     }
-// }

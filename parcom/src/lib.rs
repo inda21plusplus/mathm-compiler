@@ -43,6 +43,15 @@ impl Span {
             end: self.end.max(other.end),
         }
     }
+    pub fn merge_optional(self, other: Option<Self>) -> Self {
+        other.map_or(self, |other| self.merge(other))
+    }
+}
+
+impl Default for Span {
+    fn default() -> Self {
+        Self::new(0..0)
+    }
 }
 
 impl PartialOrd for Span {

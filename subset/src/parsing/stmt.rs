@@ -1,19 +1,19 @@
 use parcom::{
-    parsers::{StrParser, Ws},
+    parsers::{CharParser, StrParser, Ws},
     Error, Input, Parser, Span,
 };
 
 use super::{
-    expr::{Block, BlockParser, Expr},
+    expr::{Block, BlockParser},
     type_::{Struct, StructParser, Type, TypeParser},
-    Identifier, IdentifierParser,
+    Expr, Identifier, IdentifierParser,
 };
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Expr(Expr),
+    Expr(ExprStmt),
     Let(Let),
-    TypeDecl(TypeDecl),
+    TypeDef(TypeDef),
     Assign(Assignment),
     Function(Function),
 }
@@ -22,9 +22,37 @@ impl Stmt {
     pub fn parser() -> impl Parser<Output = Self> + Clone {
         LetParser.map(Self::Let).c()
             | FunctionParser.map(Self::Function)
-            | TypeDecl::parser().map(Self::TypeDecl)
+            | TypeDef::parser().map(Self::TypeDef)
             | AssignmentParser.map(Self::Assign)
-            | Expr::parser(0).map(Self::Expr)
+            | ExprStmt::parser().map(Self::Expr)
+    }
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Expr(e) => e.span,
+            Self::Let(s) => s.span,
+            Self::TypeDef(s) => s.span,
+            Self::Assign(s) => s.span,
+            Self::Function(s) => s.span,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExprStmt {
+    pub span: Span,
+    pub expr: Expr,
+    pub semi: bool,
+}
+
+impl ExprStmt {
+    pub fn parser() -> impl Parser<Output = Self> + Clone {
+        (Expr::parser(0).c() + (Ws.c() >> CharParser(';').optional())).map(|(expr, semi_span)| {
+            Self {
+                span: expr.span().merge_optional(semi_span),
+                expr,
+                semi: semi_span.is_some(),
+            }
+        })
     }
 }
 
@@ -46,9 +74,10 @@ impl Parser for LetParser {
         ((StrParser("let").c() << Ws)
             + (IdentifierParser.c() << Ws)
             + (TypeParser.c() << Ws << StrParser("=") << Ws)
-            + Expr::parser(0))
-        .map(|(((let_span, ident), type_), value)| Let {
-            span: let_span.merge(value.span()),
+            + (Expr::parser(0).c() << Ws)
+            + CharParser(';'))
+        .map(|((((let_span, ident), type_), value), semi_span)| Let {
+            span: let_span.merge(semi_span),
             ident,
             type_,
             value,
@@ -71,13 +100,15 @@ impl Parser for AssignmentParser {
     type Output = Assignment;
 
     fn parse(self, input: parcom::Input) -> Result<(parcom::Input, Self::Output), parcom::Error> {
-        ((Expr::parser(0).c() << Ws << StrParser("=") << Ws) + Expr::parser(0))
-            .map(|(left, value)| Assignment {
-                span: left.span().merge(value.span()),
-                left,
-                value,
-            })
-            .parse(input)
+        ((Expr::parser(0).c() << Ws << StrParser("=") << Ws) + Expr::parser(0)
+            << Ws
+            << CharParser(';'))
+        .map(|(left, value)| Assignment {
+            span: left.span().merge(value.span()),
+            left,
+            value,
+        })
+        .parse(input)
     }
 }
 
@@ -114,16 +145,16 @@ impl Parser for FunctionParser {
 }
 
 #[derive(Debug, Clone)]
-pub struct TypeDecl {
+pub struct TypeDef {
     pub span: Span,
     pub ident: Identifier,
     pub type_: Type,
 }
 
-impl TypeDecl {
+impl TypeDef {
     pub fn parser() -> impl Parser<Output = Self> + Clone {
         ((StrParser("type").c() << Ws) + (IdentifierParser.c() << Ws) + TypeParser).map(
-            |((type_span, ident), type_)| TypeDecl {
+            |((type_span, ident), type_)| TypeDef {
                 span: type_span.merge(type_.span()),
                 ident,
                 type_,

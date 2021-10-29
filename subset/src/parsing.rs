@@ -1,13 +1,33 @@
-mod expr;
-mod number;
-mod stmt;
-mod string;
-mod type_;
+pub mod expr;
+pub mod number;
+pub mod stmt;
+pub mod string;
+pub mod type_;
 
-use parcom::{parsers::PredicateParser, Error, Input, Parser, Span};
+use parcom::{
+    parsers::{EofParser, PredicateParser, Ws},
+    Error, Input, Parser, Span,
+};
+
+pub use expr::Expr;
 pub use stmt::Stmt;
+pub use type_::Type;
 
 #[derive(Debug, Clone)]
+pub struct Module {
+    pub stmts: Vec<Stmt>,
+}
+
+impl Module {
+    pub fn parse(input: Input) -> Result<Self, Error> {
+        (Ws.c() >> Stmt::parser().sep_by(Ws) << EofParser)
+            .map(|stmts| Self { stmts })
+            .parse(input)
+            .map(|(_, module)| module)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identifier {
     pub span: Span,
     pub name: String,
@@ -28,7 +48,11 @@ impl Parser for IdentifierParser {
             name.push_str(&original_input[char_span]);
         }
 
-        if ["if", "else", "null"].contains(&name.as_ref()) {
+        if [
+            "if", "else", "null", "break", "return", "fn", "not", "and", "or",
+        ]
+        .contains(&name.as_ref())
+        {
             Err(Error::new(span))
         } else {
             Ok((input, Identifier { span, name }))

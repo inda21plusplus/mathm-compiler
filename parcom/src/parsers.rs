@@ -106,3 +106,17 @@ impl Parser for IntegerParser {
             .parse(input)
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct EofParser;
+
+impl Parser for EofParser {
+    type Output = ();
+
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
+        match input.next() {
+            None => Ok((input, ())),
+            Some((_rest, _ch)) => Err(Error::new(Span::first(&input))),
+        }
+    }
+}
