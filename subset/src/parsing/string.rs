@@ -1,6 +1,6 @@
 use parcom::{parsers::CharParser, Error, Input, Parser, Span};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringLiteral {
     pub span: Span,
     pub value: String,

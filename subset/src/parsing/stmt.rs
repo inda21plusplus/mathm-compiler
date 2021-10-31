@@ -5,7 +5,7 @@ use parcom::{
 
 use super::{
     expr::{Block, BlockParser},
-    type_::{Struct, StructParser, Type, TypeParser},
+    type_::{Type, TypeParser},
     Expr, Identifier, IdentifierParser,
 };
 
@@ -13,7 +13,6 @@ use super::{
 pub enum Stmt {
     Expr(ExprStmt),
     Let(Let),
-    TypeDef(TypeDef),
     Assign(Assignment),
     Function(Function),
 }
@@ -22,7 +21,6 @@ impl Stmt {
     pub fn parser() -> impl Parser<Output = Self> + Clone {
         LetParser.map(Self::Let).c()
             | FunctionParser.map(Self::Function)
-            | TypeDef::parser().map(Self::TypeDef)
             | AssignmentParser.map(Self::Assign)
             | ExprStmt::parser().map(Self::Expr)
     }
@@ -30,7 +28,6 @@ impl Stmt {
         match self {
             Self::Expr(e) => e.span,
             Self::Let(s) => s.span,
-            Self::TypeDef(s) => s.span,
             Self::Assign(s) => s.span,
             Self::Function(s) => s.span,
         }
@@ -116,7 +113,7 @@ impl Parser for AssignmentParser {
 pub struct Function {
     pub span: Span,
     pub ident: Identifier,
-    pub params: Struct,
+    pub params: Vec<(Identifier, Type)>,
     pub return_type: Type,
     pub body: Block,
 }
@@ -128,15 +125,16 @@ impl Parser for FunctionParser {
     type Output = Function;
 
     fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
-        ((((StrParser("fn").c() << Ws) + IdentifierParser + StructParser) << Ws)
-            + (TypeParser.c() << Ws)
+        ((((StrParser("fn").c() << Ws) + IdentifierParser + ParamsParser) << Ws)
+            + (TypeParser.optional().c() << Ws)
             + BlockParser)
             .map(
                 |((((fn_span, ident), params), return_type), body)| Function {
                     span: fn_span.merge(body.span),
                     ident,
                     params,
-                    return_type,
+                    return_type: return_type
+                        .unwrap_or(Type::Null(Span::new(body.span.start - 1..body.span.start))),
                     body,
                 },
             )
@@ -144,21 +142,17 @@ impl Parser for FunctionParser {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TypeDef {
-    pub span: Span,
-    pub ident: Identifier,
-    pub type_: Type,
-}
+#[derive(Debug, Clone, Copy)]
+pub struct ParamsParser;
 
-impl TypeDef {
-    pub fn parser() -> impl Parser<Output = Self> + Clone {
-        ((StrParser("type").c() << Ws) + (IdentifierParser.c() << Ws) + TypeParser).map(
-            |((type_span, ident), type_)| TypeDef {
-                span: type_span.merge(type_.span()),
-                ident,
-                type_,
-            },
-        )
+impl Parser for ParamsParser {
+    type Output = Vec<(Identifier, Type)>;
+
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
+        (CharParser('(').c() << Ws
+            >> ((IdentifierParser.c() << Ws) + TypeParser).sep_by(Ws.c() + CharParser(',') + Ws)
+            << Ws.c()
+            << CharParser(')'))
+        .parse(input)
     }
 }

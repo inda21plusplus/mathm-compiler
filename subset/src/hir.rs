@@ -1,175 +1,25 @@
-use std::mem;
+use std::{collections::HashMap, mem, ops};
 
 use parcom::Span;
 
-use crate::parsing::{self, expr, stmt, type_, Expr, Identifier, Stmt, Type};
+use crate::{
+    parsing::{
+        self, expr, number::IntegerLiteral, stmt, string::StringLiteral, Expr, Identifier, Stmt,
+        Type,
+    },
+    Builtin,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum HirGenError {
     InvalidTopLevelStatement(Span),
     InvalidAssignmentTarget(Span),
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct HirGen {
-    generated_blocks: Vec<Block>,
-    current_locals: Vec<Local>,
-    current_block: Vec<Instruction>,
-    errors: Vec<HirGenError>,
-}
-
-impl HirGen {
-    fn generate(mut self, module: parsing::Module) -> Result<Hir, Vec<HirGenError>> {
-        let mut type_defs = vec![];
-        let mut functions = vec![];
-        for stmt in module.stmts {
-            match stmt {
-                Stmt::Expr(expr) => self.error(HirGenError::InvalidTopLevelStatement(expr.span)),
-                Stmt::Let(_) => todo!(),
-                Stmt::TypeDef(type_def) => type_defs.push(type_def),
-                Stmt::Assign(ass) => self.error(HirGenError::InvalidTopLevelStatement(ass.span)),
-                Stmt::Function(f) => {
-                    functions.push(self.generate_func(f));
-                    assert!(self.generated_blocks.is_empty());
-                    assert!(self.current_locals.is_empty());
-                    assert!(self.current_block.is_empty());
-                }
-            }
-        }
-
-        if self.errors.is_empty() {
-            Ok(Hir {
-                type_defs,
-                functions,
-            })
-        } else {
-            Err(self.errors)
-        }
-    }
-
-    fn error(&mut self, err: HirGenError) {
-        self.errors.push(err);
-    }
-
-    pub fn generate_func(&mut self, func: stmt::Function) -> Function {
-        for stmt in func.body.stmts.into_iter() {
-            self.generate_stmt(stmt);
-        }
-
-        self.generated_blocks.push(Block {
-            instructions: mem::take(&mut self.current_block),
-        });
-
-        let locals = mem::take(&mut self.current_locals);
-        let body = mem::take(&mut self.generated_blocks);
-
-        Function {
-            span: func.span,
-            ident: func.ident,
-            params: func.params,
-            return_type: func.return_type,
-            locals,
-            body,
-        }
-    }
-
-    fn generate_stmt(&mut self, stmt: Stmt) {
-        match stmt {
-            Stmt::Expr(expr_stmt) => {
-                self.generate_expr(expr_stmt.expr);
-                // assert stack wasnt changed or something like that
-            }
-            Stmt::Assign(assign) => self.generate_assignment(assign),
-            _ => todo!(),
-        }
-    }
-
-    fn generate_assignment(&mut self, assignment: stmt::Assignment) {
-        self.generate_expr(assignment.value);
-        match assignment.left {
-            Expr::Ident(ident) => self
-                .current_block
-                .push(Instruction::SaveIdent(assignment.span, ident)),
-            expr => self.error(HirGenError::InvalidAssignmentTarget(expr.span())),
-        }
-    }
-
-    fn generate_expr(&mut self, expr: Expr) {
-        match expr {
-            Expr::Literal(expr::Literal::Integer(i)) => self
-                .current_block
-                .push(Instruction::LiteralInteger(i.span, i.value)),
-            Expr::Literal(expr::Literal::Null(n)) => {
-                self.current_block.push(Instruction::LiteralNull(n.span))
-            }
-            Expr::Ident(ident) => self.current_block.push(Instruction::Ident(ident)),
-            Expr::BinaryOperation(expr) => self.generate_binary_op_expr(expr),
-            Expr::UnaryOperation(expr) => self.generate_unary_op_expr(expr),
-            Expr::Construction(constr) => self.generate_construction(constr),
-            _ => todo!(),
-        }
-    }
-
-    fn generate_construction(&mut self, mut constr: expr::Construction) {
-        let mut counter = 0..;
-        let mut params = vec![];
-        for param in constr.params.iter_mut() {
-            if let Some(key) = &mut param.key {
-                params.push(ConstructionParam::Ident(mem::replace(
-                    key,
-                    Identifier {
-                        span: Span::default(),
-                        name: "".into(),
-                    },
-                )));
-            } else {
-                params.push(ConstructionParam::Int(counter.next().unwrap()));
-            }
-        }
-        for param in constr.params.into_iter().rev() {
-            self.generate_expr(param.value);
-        }
-
-        if let Some(left) = constr.left {
-            self.generate_expr(*left);
-            self.current_block
-                .push(Instruction::Construction(constr.span, params));
-        } else {
-            self.current_block
-                .push(Instruction::AnonymousConstruction(constr.span, params));
-        }
-    }
-
-    fn generate_binary_op_expr(&mut self, expr: expr::BinaryOperation) {
-        self.generate_expr(*expr.left);
-        self.generate_expr(*expr.right);
-        self.current_block.push(Instruction::Ident(Identifier {
-            span: Span::default(),
-            name: expr.op.to_string(),
-        }));
-        self.current_block.push(Instruction::Construction(
-            expr.span,
-            vec![ConstructionParam::Int(1), ConstructionParam::Int(0)],
-        ));
-    }
-
-    fn generate_unary_op_expr(&mut self, expr: expr::UnaryOperation) {
-        self.generate_expr(*expr.expr);
-        self.current_block.push(Instruction::Ident(Identifier {
-            span: Span::default(),
-            name: expr.op.to_string(),
-        }));
-        self.current_block.push(Instruction::Construction(
-            expr.span,
-            vec![ConstructionParam::Int(0)],
-        ));
-    }
+    UnkownIdentifier(Span),
 }
 
 /// High-level IR
 #[derive(Debug, Clone)]
 pub struct Hir {
-    pub type_defs: Vec<stmt::TypeDef>,
     pub functions: Vec<Function>,
 }
 
@@ -183,10 +33,10 @@ impl Hir {
 pub struct Function {
     pub span: Span,
     pub ident: Identifier,
-    pub params: type_::Struct,
-    pub return_type: Type,
+    pub params: Vec<(Identifier, Type)>,
+    pub ret_type: Type,
     pub locals: Vec<Local>,
-    pub body: Vec<Block>,
+    pub body: HashMap<BlockId, Block>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,23 +48,340 @@ pub struct Local {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Block {
+    pub id: BlockId,
     pub instructions: Vec<Instruction>,
+}
+
+impl ops::Deref for Block {
+    type Target = Vec<Instruction>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.instructions
+    }
+}
+
+impl ops::DerefMut for Block {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.instructions
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
-    LiteralInteger(Span, u128),
-    LiteralNull(Span),
-    Ident(Identifier),
-    Construction(Span, Vec<ConstructionParam>),
-    AnonymousConstruction(Span, Vec<ConstructionParam>),
-    SaveIdent(Span, Identifier),
+    IntegerLiteral(IntegerLiteral),
+    NullLiteral(Span),
+    StringLiteral(StringLiteral),
+    Push(Resolved),
+    Save(Resolved),
+    Call(Span, usize),
+    Branch(BlockId, BlockId),
+    Jump(BlockId),
+    Invalid { stack_change: isize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConstructionParam {
-    Ident(Identifier),
-    Int(usize),
+pub enum Resolved {
+    Local(Span, usize),
+    Parameter(Span, usize),
+    Global(Span, usize),
+    Builtin(Span, Builtin),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct BlockId(usize);
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct HirGen {
+    block_id_counter: BlockId,
+    generated_blocks: HashMap<BlockId, Block>,
+    current_locals: Vec<Local>,
+    current_block: Block,
+    errors: Vec<HirGenError>,
+    scope: Box<Scope>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Scope {
+    parameters: HashMap<String, usize>,
+    locals: HashMap<String, usize>,
+    globals: HashMap<String, usize>,
+    parent: Option<Box<Self>>,
+}
+
+impl Scope {
+    fn lookup(mut self: &Box<Self>, ident: &Identifier) -> Option<Resolved> {
+        loop {
+            if let Some(&local) = self.locals.get(&ident.name) {
+                break Some(Resolved::Local(ident.span, local));
+            } else if let Some(&param) = self.parameters.get(&ident.name) {
+                break Some(Resolved::Parameter(ident.span, param));
+            } else if let Some(&global) = self.globals.get(&ident.name) {
+                break Some(Resolved::Global(ident.span, global));
+            }
+            match self.parent {
+                Some(ref parent) => self = parent,
+                None => {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+impl HirGen {
+    fn generate(mut self, module: parsing::Module) -> Result<Hir, Vec<HirGenError>> {
+        let mut functions = vec![];
+        for stmt in module.stmts {
+            match stmt {
+                Stmt::Expr(expr) => self.error(HirGenError::InvalidTopLevelStatement(expr.span)),
+                Stmt::Let(_) => todo!(),
+                Stmt::Assign(ass) => self.error(HirGenError::InvalidTopLevelStatement(ass.span)),
+                Stmt::Function(f) => {
+                    functions.push(self.generate_func(f));
+                    assert!(self.generated_blocks.is_empty());
+                    assert!(self.current_locals.is_empty());
+                    assert!(self.current_block.is_empty());
+                }
+            }
+        }
+
+        if self.errors.is_empty() {
+            Ok(Hir { functions })
+        } else {
+            Err(self.errors)
+        }
+    }
+
+    fn generate_func(&mut self, func: stmt::Function) -> Function {
+        if !self.generated_blocks.is_empty() {
+            todo!(
+                "Add support for generating function inside another function, perhaps by deferring"
+            );
+        }
+
+        let tmp = mem::take(&mut self.scope);
+        self.scope = Box::new(Scope {
+            parameters: func
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, (ident, _))| (ident.name.clone(), i))
+                .collect(),
+            parent: Some(tmp),
+            ..Default::default()
+        });
+
+        let end_block_id = self.next_block_id();
+        self.generate_block(func.body, end_block_id);
+        // TODO: maybe create a block with this id???
+
+        let locals = mem::replace(&mut self.current_locals, vec![]);
+        let body = mem::replace(&mut self.generated_blocks, HashMap::new());
+
+        Function {
+            span: func.span,
+            ident: func.ident,
+            params: func.params,
+            ret_type: func.return_type,
+            locals,
+            body,
+        }
+    }
+
+    fn generate_block(&mut self, block: expr::Block, continue_at: BlockId) {
+        let tmp = mem::take(&mut self.scope);
+        self.scope = Box::new(Scope {
+            parent: Some(tmp),
+            ..Default::default()
+        });
+
+        for stmt in block.stmts.into_iter() {
+            self.generate_stmt(stmt);
+        }
+
+        self.current_block.push(Instruction::Jump(continue_at));
+
+        self.finish_block();
+    }
+
+    fn generate_stmt(&mut self, stmt: Stmt) {
+        match stmt {
+            Stmt::Expr(expr_stmt) => {
+                self.generate_expr(expr_stmt.expr);
+                // make sure stack wasn't changed or something like that
+            }
+            Stmt::Assign(assign) => self.generate_assignment(assign),
+            Stmt::Let(leet) => self.generate_local(leet),
+            _ => todo!(),
+        }
+    }
+
+    fn generate_local(&mut self, leet: stmt::Let) {
+        let name = leet.ident.name.clone();
+        let index = self.current_locals.len();
+        self.current_locals.push(Local {
+            span: leet.span,
+            ident: leet.ident,
+            type_: leet.type_,
+        });
+        self.scope.locals.insert(name, index);
+        self.generate_expr(leet.value);
+        self.current_block
+            .push(Instruction::Save(Resolved::Local(leet.span, index)));
+    }
+
+    fn generate_assignment(&mut self, assignment: stmt::Assignment) {
+        self.generate_expr(assignment.value);
+        match assignment.left {
+            Expr::Ident(ident) => {
+                if let Some(resolved) = self.scope.lookup(&ident) {
+                    self.current_block.push(Instruction::Save(resolved));
+                } else {
+                    self.error(HirGenError::UnkownIdentifier(ident.span));
+                    self.current_block
+                        .push(Instruction::Invalid { stack_change: -1 });
+                }
+            }
+            expr => self.error(HirGenError::InvalidAssignmentTarget(expr.span())),
+        }
+    }
+
+    fn generate_expr(&mut self, expr: Expr) {
+        match expr {
+            Expr::Literal(expr::Literal::Integer(i)) => {
+                self.current_block.push(Instruction::IntegerLiteral(i))
+            }
+            Expr::Literal(expr::Literal::Null(n)) => {
+                self.current_block.push(Instruction::NullLiteral(n.span))
+            }
+            Expr::Literal(expr::Literal::Str(s)) => {
+                self.current_block.push(Instruction::StringLiteral(s))
+            }
+            Expr::Ident(ident) => self.generate_ident(ident),
+            Expr::BinaryOperation(expr) => self.generate_binary_op_expr(expr),
+            Expr::UnaryOperation(expr) => self.generate_unary_op_expr(expr),
+            Expr::Call(call) => self.generate_call(call),
+            Expr::If(eef) => self.generate_if(eef),
+            Expr::Block(block) => {
+                // TODO: I feel like I'm mixing up block and basic blocks here. Rename `hir::Block`
+                // to `BosicBlock`. `generate_block` is some awful mix between a block { ... } and a
+                // basic block
+                let block_id = self.next_block_id();
+                let next_id = self.next_block_id();
+                self.current_block.push(Instruction::Jump(block_id));
+                self.finish_block();
+                self.current_block.id = block_id;
+                self.generate_block(block, next_id);
+                self.current_block.id = next_id;
+            }
+            _ => todo!(),
+        }
+    }
+
+    /// block0:
+    ///     push param 420
+    ///
+    ///     push param 1
+    ///     push value "hej"
+    ///     binary eq
+    ///     jump_cond if_true_block if_false_block
+    ///
+    /// if_true_block:
+    ///     push value 69 000
+    ///     jump block1
+    ///
+    /// if_false_block:
+    ///     push value 0
+    ///     jump block1
+    ///
+    /// block1:
+    ///     binary plus
+    ///     push builtin print
+    ///     call 2
+    ///     ...
+
+    fn generate_if(&mut self, eef: expr::If) {
+        self.generate_expr(*eef.condition);
+        let true_block_id = self.next_block_id();
+        let false_block_id = self.next_block_id();
+        self.current_block
+            .push(Instruction::Branch(true_block_id, false_block_id));
+        self.finish_block();
+        let next_id = self.next_block_id();
+        self.current_block.id = true_block_id;
+        self.generate_block(eef.then, next_id);
+        if let Some(elze) = eef.elze {
+            self.current_block.id = false_block_id;
+            self.generate_block(elze, next_id);
+        }
+
+        self.current_block.id = next_id;
+    }
+
+    fn generate_ident(&mut self, ident: Identifier) {
+        if let Some(builtin) = Builtin::lookup(&ident) {
+            self.current_block
+                .push(Instruction::Push(Resolved::Builtin(ident.span, builtin)));
+        } else if let Some(resolved) = self.scope.lookup(&ident) {
+            self.current_block.push(Instruction::Push(resolved));
+        } else {
+            self.error(HirGenError::UnkownIdentifier(ident.span));
+            self.current_block
+                .push(Instruction::Invalid { stack_change: 1 });
+        }
+    }
+
+    fn generate_call(&mut self, call: expr::Call) {
+        let params_len = call.params.len();
+        for param in call.params.into_iter().rev() {
+            self.generate_expr(param);
+        }
+
+        self.generate_expr(*call.func);
+        self.current_block
+            .push(Instruction::Call(call.span, params_len));
+    }
+
+    fn generate_binary_op_expr(&mut self, expr: expr::BinaryOperation) {
+        self.generate_expr(*expr.left);
+        self.generate_expr(*expr.right);
+        self.generate_ident(Identifier {
+            span: expr.span,
+            name: expr.op.to_string(),
+        });
+        self.current_block.push(Instruction::Call(expr.span, 2));
+    }
+
+    fn generate_unary_op_expr(&mut self, expr: expr::UnaryOperation) {
+        self.generate_expr(*expr.expr);
+        self.generate_ident(Identifier {
+            span: expr.span,
+            name: expr.op.to_string(),
+        });
+        self.current_block.push(Instruction::Call(expr.span, 1));
+    }
+
+    fn error(&mut self, err: HirGenError) {
+        self.errors.push(err);
+    }
+
+    fn next_block_id(&mut self) -> BlockId {
+        self.block_id_counter = BlockId(self.block_id_counter.0 + 1);
+        self.block_id_counter
+    }
+
+    /// Moves `self.current_block` into `self.generated_blocks`
+    fn finish_block(&mut self) {
+        let id = self.next_block_id();
+        let block = mem::replace(
+            &mut self.current_block,
+            Block {
+                id,
+                instructions: vec![],
+            },
+        );
+        self.generated_blocks.insert(block.id, block);
+    }
 }
 
 /// let skip usize = 1;

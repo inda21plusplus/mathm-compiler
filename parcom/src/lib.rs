@@ -13,8 +13,8 @@ pub use parser::Parser;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Span {
-    start: usize,
-    end: usize,
+    pub start: usize,
+    pub end: usize,
     // todo: in which file?
 }
 

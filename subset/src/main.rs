@@ -1,5 +1,6 @@
 #![feature(stdin_forwarders, box_patterns)]
 
+mod builtins;
 mod error;
 mod hir;
 pub mod parsing;
@@ -9,12 +10,13 @@ mod tests;
 
 use std::io::{stdin, stdout, Write};
 
+pub use builtins::Builtin;
 pub use error::Error;
 use parcom::{Input, Parser, Span};
 
 use crate::{
     hir::Hir,
-    parsing::{expr::Block, type_::Struct, Identifier, Module, Type},
+    parsing::{expr::Block, Identifier, Module, Type},
 };
 
 fn main() {
@@ -38,14 +40,8 @@ fn main() {
                             span: Span::new(0..0),
                             name: "main".into(),
                         },
-                        params: Struct {
-                            span: Span::new(0..0),
-                            types: vec![],
-                        },
-                        return_type: Type::Struct(Struct {
-                            span: Span::new(0..0),
-                            types: vec![],
-                        }),
+                        params: vec![],
+                        return_type: Type::Null(Span::new(0..0)),
                         body: Block {
                             span: Span::new(0..0),
                             stmts: vec![output],

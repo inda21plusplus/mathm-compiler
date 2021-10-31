@@ -1,29 +1,44 @@
-use parcom::{Input, Parser};
+use parcom::Input;
 
 use crate::{
-    hir::{HirGen, Instruction},
-    parsing::Stmt,
+    hir::{Hir, Instruction, Resolved},
+    parsing::{number::IntegerLiteral, Module},
+    Builtin,
 };
 
 #[test]
 fn generate_hir() {
-    let mut hg = HirGen::default();
     let input = Input::new(
-        "fn one() usize {
-             1
+        "fn add_one(n usize) usize {
+             n + 1
          }",
     );
-    let (_, f) = Stmt::parser().parse(input).unwrap();
-    let f = match f {
-        Stmt::Function(f) => f,
-        _ => panic!(),
-    };
+    let module = Module::parse(input).unwrap();
 
-    let f = hg.generate_func(f);
+    let hir = Hir::generate(module).unwrap();
+    assert_eq!(hir.functions.len(), 1);
+    let f = &hir.functions[0];
     assert_eq!(f.body.len(), 1);
-    assert_eq!(f.body[0].instructions.len(), 1);
-    assert!(matches!(
-        f.body[0].instructions[0],
-        Instruction::LiteralInteger(_, 1)
-    ));
+    assert_eq!(
+        f.body[0].instructions.len(),
+        4,
+        "{:#?}",
+        f.body[0].instructions
+    );
+    match &f.body[0].instructions[0] {
+        Instruction::Push(Resolved::Parameter(_, 0)) => (),
+        other => panic!("{:#?}", other.clone()),
+    }
+    match &f.body[0].instructions[1] {
+        Instruction::IntegerLiteral(IntegerLiteral { value: 1, .. }) => (),
+        other => panic!("{:#?}", other.clone()),
+    }
+    match &f.body[0].instructions[2] {
+        Instruction::Push(Resolved::Builtin(_, Builtin::Plus)) => (),
+        other => panic!("{:#?}", other.clone()),
+    }
+    match &f.body[0].instructions[3] {
+        Instruction::Call(_, 2) => (),
+        other => panic!("{:#?}", other.clone()),
+    }
 }

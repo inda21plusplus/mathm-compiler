@@ -3,7 +3,7 @@ use parcom::{
     Error, Input, Parser, Span,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IntegerLiteral {
     pub span: Span,
     pub base: u32,

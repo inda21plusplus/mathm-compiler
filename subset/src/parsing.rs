@@ -42,14 +42,16 @@ impl Parser for IdentifierParser {
     fn parse(self, original_input: Input) -> Result<(Input, Self::Output), Error> {
         let (mut input, mut span) = PredicateParser(char::is_alphabetic).parse(original_input)?;
         let mut name = original_input[span].to_string();
-        while let Ok((rest, char_span)) = PredicateParser(char::is_alphanumeric).parse(input) {
+        while let Ok((rest, char_span)) =
+            PredicateParser(|c| c.is_alphanumeric() || c == '_').parse(input)
+        {
             input = rest;
             span = span.merge(char_span);
             name.push_str(&original_input[char_span]);
         }
 
         if [
-            "if", "else", "null", "break", "return", "fn", "not", "and", "or",
+            "if", "else", "null", "break", "return", "fn", "not", "and", "or", "let",
         ]
         .contains(&name.as_ref())
         {

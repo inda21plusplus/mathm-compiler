@@ -19,16 +19,14 @@ use super::{
 pub enum Expr {
     Literal(Literal),
     Ident(Identifier),
-    DotAccess(DotAccess),
     UnaryOperation(UnaryOperation),
     BinaryOperation(BinaryOperation),
-    Construction(Construction),
+    Call(Call),
     Block(Block),
     If(If),
     Loop(Loop),
     Break(Break),
     Return(Return),
-    // // Cast(Cast),
 }
 
 mod precedence_levels {
@@ -39,7 +37,7 @@ mod precedence_levels {
     pub const BINARY_FACTORS: usize = 5;
     pub const BINARY_MOD: usize = 6;
     pub const UNARY_OPERATION: usize = 7;
-    pub const SUFFIX: usize = 8; // foo.bar and foo()
+    pub const CALL: usize = 8;
 }
 
 impl Expr {
@@ -50,8 +48,9 @@ impl Expr {
             | UnaryOperationParser
                 .when(precedence_level <= precedence_levels::UNARY_OPERATION)
                 .map(Self::UnaryOperation)
-            | ConstructionParenParser.map(Self::Construction)
-            | SuffixParser.when(precedence_level < precedence_levels::SUFFIX)
+            | CallParser
+                .when(precedence_level < precedence_levels::CALL)
+                .map(Self::Call)
             | BlockParser.map(Self::Block)
             | IfParser.map(Self::If)
             | LoopParser.map(Self::Loop)
@@ -64,10 +63,9 @@ impl Expr {
         match self {
             Self::Literal(l) => l.span(),
             Self::Ident(i) => i.span,
-            Self::DotAccess(d) => d.span,
             Self::UnaryOperation(u) => u.span,
             Self::BinaryOperation(b) => b.span,
-            Self::Construction(c) => c.span,
+            Self::Call(c) => c.span,
             Self::Block(b) => b.span,
             Self::If(i) => i.span,
             Self::Loop(l) => l.span,
@@ -287,92 +285,40 @@ pub struct DotAccess {
 }
 
 #[derive(Debug, Clone)]
-pub struct Construction {
+pub struct Call {
     pub span: Span,
-    pub left: Option<Box<Expr>>,
-    pub params: Vec<ConstructionParameter>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ConstructionParameter {
-    pub key: Option<Identifier>,
-    pub value: Expr,
+    pub func: Box<Expr>,
+    pub params: Vec<Expr>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SuffixParser;
+pub struct CallParser;
 
-impl Parser for SuffixParser {
-    type Output = Expr;
+impl Parser for CallParser {
+    type Output = Call;
 
     fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
-        let (mut input, mut left) = Expr::parser(precedence_levels::SUFFIX)
+        let (mut input, mut func) = Expr::parser(precedence_levels::CALL)
             .map(Box::new)
             .parse(input)?;
 
-        loop {
-            if let Ok((rest, constr)) = ConstructionParenParser.parse(input) {
-                input = rest;
-                left = Box::new(Expr::Construction(Construction {
-                    span: left.span().merge(constr.span),
-                    left: Some(left),
-                    params: constr.params,
-                }));
-            } else if let Ok((rest, ident)) =
-                (Ws.c() >> CharParser('.') >> Ws >> IdentifierParser).parse(input)
-            {
-                input = rest;
-                left = Box::new(Expr::DotAccess(DotAccess {
-                    span: left.span().merge(ident.span),
-                    left,
-                    ident,
-                }));
-            } else {
-                break;
-            }
+        while let Ok((rest, ((lparen_span, params), rparen_span))) = (CharParser('(').c()
+            + (Ws.c() >> (Expr::parser(0).sep_by(Ws.c() + CharParser(',') + Ws)))
+            + (Ws.c() >> CharParser(')')))
+        .parse(input)
+        {
+            input = rest;
+            func = Box::new(Expr::Call(Call {
+                span: lparen_span.merge(rparen_span),
+                func,
+                params,
+            }));
         }
 
-        Ok((input, *left))
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ConstructionParenParser;
-
-impl Parser for ConstructionParenParser {
-    type Output = Construction;
-
-    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
-        ((CharParser('(').c()
-            + (Ws.c()
-                >> (ConstructionParameter::parser()
-                    .sep_by(Ws.c() + CharParser(',') + Ws)
-                    .c()))
-            + (Ws.c() >> CharParser(')')))
-        .map(|((lparen_span, params), rparen_span)| Construction {
-            span: lparen_span.merge(rparen_span),
-            left: None,
-            params,
-        }))
-        .parse(input)
-    }
-}
-
-impl ConstructionParameter {
-    fn parser() -> impl Parser<Output = Self> + Clone {
-        ((IdentifierParser.c() << Ws << CharParser('=') << Ws) + Expr::parser(0))
-            .map(|(key, value)| Self {
-                key: Some(key),
-                value,
-            })
-            .c()
-            | Expr::parser(0).map(|value| Self { key: None, value })
-            | CharParser('=').c()
-                >> Ws
-                >> IdentifierParser.map(|key| Self {
-                    key: Some(key.clone()),
-                    value: Expr::Ident(key),
-                })
+        match *func {
+            Expr::Call(call) => Ok((input, call)),
+            _ => Err(Error::new(Span::first(&input))),
+        }
     }
 }
 
