@@ -51,7 +51,7 @@ impl Parser for IdentifierParser {
         }
 
         if [
-            "if", "else", "null", "break", "return", "fn", "not", "and", "or", "let",
+            "if", "else", "null", "break", "return", "fn", "true", "false", "and", "or", "let",
         ]
         .contains(&name.as_ref())
         {

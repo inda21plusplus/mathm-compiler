@@ -1,11 +1,15 @@
-use std::{collections::HashMap, mem, ops};
+use std::{collections::HashMap, mem};
 
 use parcom::Span;
 
 use crate::{
     parsing::{
-        self, expr, number::IntegerLiteral, stmt, string::StringLiteral, Expr, Identifier, Stmt,
-        Type,
+        self,
+        expr::{self, BoolLiteral},
+        number::IntegerLiteral,
+        stmt::{self, ExprStmt},
+        string::StringLiteral,
+        Expr, Identifier, Stmt, Type,
     },
     Builtin,
 };
@@ -16,6 +20,7 @@ pub enum HirGenError {
     InvalidAssignmentTarget(Span),
     UnkownIdentifier(Span),
     NoBreakDestination(Span),
+    NoContinueDestination(Span),
 }
 
 /// High-level IR
@@ -55,36 +60,42 @@ pub struct BasicBlock {
     pub instructions: Vec<Instruction>,
 }
 
-impl ops::Deref for BasicBlock {
-    type Target = Vec<Instruction>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.instructions
-    }
-}
-
 /// The block with id `BasicBlockId::default()` is always executed first
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct BasicBlockId(usize);
-
-impl ops::DerefMut for BasicBlock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.instructions
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
     IntegerLiteral(IntegerLiteral),
     NullLiteral(Span),
     StringLiteral(StringLiteral),
+    BoolLiteral(BoolLiteral),
     Push(Resolved),
     Save(Resolved),
     Call(Span, usize),
     Branch(BasicBlockId, BasicBlockId),
     Jump(BasicBlockId),
     Return,
-    Invalid { stack_change: isize },
+    Discard(usize),
+    Invalid { stack_delta: isize },
+}
+
+impl Instruction {
+    pub fn stack_delta(&self) -> isize {
+        match *self {
+            Self::IntegerLiteral(_)
+            | Self::NullLiteral(_)
+            | Self::StringLiteral(_)
+            | Self::BoolLiteral(_)
+            | Self::Push(_) => 1,
+            Self::Save(_) => -1,
+            Self::Call(_, params) => -(params as isize), // removes params, removes ident, pushes return value onto stack
+            Self::Branch(_, _) => -1,
+            Self::Jump(_) | Self::Return => 0,
+            Self::Invalid { stack_delta } => stack_delta,
+            Self::Discard(amount) => -(amount as isize),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,17 +112,21 @@ pub struct HirGen {
     generated_basic_blocks: HashMap<BasicBlockId, BasicBlock>,
     current_locals: Vec<Local>,
     current_basic_block: BasicBlock,
+    return_basic_block_id: BasicBlockId,
+    curr_stack_height: StackHeight,
     errors: Vec<HirGenError>,
     scope: Box<Scope>,
 }
+
+type StackHeight = isize;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Scope {
     parameters: HashMap<String, usize>,
     locals: HashMap<String, usize>,
     globals: HashMap<String, usize>,
-    break_destination: Option<BasicBlockId>,
-    continue_destination: Option<BasicBlockId>,
+    break_destination: Option<(BasicBlockId, StackHeight)>,
+    continue_destination: Option<(BasicBlockId, StackHeight)>,
     parent: Option<Box<Self>>,
 }
 
@@ -143,7 +158,7 @@ impl Scope {
         }
     }
 
-    fn get_break_destination(self: &Box<Self>) -> Option<BasicBlockId> {
+    fn get_break_destination(self: &Box<Self>) -> Option<(BasicBlockId, StackHeight)> {
         if self.break_destination.is_some() {
             self.break_destination
         } else if let Some(ref parent) = self.parent {
@@ -153,7 +168,7 @@ impl Scope {
         }
     }
 
-    fn get_continue_destination(self: &Box<Self>) -> Option<BasicBlockId> {
+    fn get_continue_destination(self: &Box<Self>) -> Option<(BasicBlockId, StackHeight)> {
         if self.continue_destination.is_some() {
             self.continue_destination
         } else if let Some(ref parent) = self.parent {
@@ -176,7 +191,7 @@ impl HirGen {
                     functions.push(self.generate_func(f));
                     assert!(self.generated_basic_blocks.is_empty());
                     assert!(self.current_locals.is_empty());
-                    assert!(self.current_basic_block.is_empty());
+                    assert!(self.current_basic_block.instructions.is_empty());
                 }
             }
         }
@@ -205,9 +220,10 @@ impl HirGen {
             ..Default::default()
         });
 
-        let end_basic_block_id = self.next_basic_block_id();
-        self.generate_block(func.body, end_basic_block_id);
-        self.current_basic_block.push(Instruction::Return);
+        self.return_basic_block_id = self.next_basic_block_id();
+        self.generate_block(func.body, self.return_basic_block_id);
+        self.current_basic_block.id = self.return_basic_block_id;
+        self.instr(Instruction::Return);
         self.finish_basic_block();
 
         let locals = mem::replace(&mut self.current_locals, vec![]);
@@ -223,15 +239,43 @@ impl HirGen {
         }
     }
 
-    fn generate_stmt(&mut self, stmt: Stmt) {
+    /// Returns true if statement pushed value onto stack
+    fn generate_stmt(&mut self, stmt: Stmt) -> bool {
         match stmt {
-            Stmt::Expr(expr_stmt) => {
-                self.generate_expr(expr_stmt.expr);
-                // make sure stack wasn't changed or something like that
+            Stmt::Expr(ExprStmt {
+                expr, semi: false, ..
+            }) => {
+                self.generate_expr(expr);
+                return true;
+            }
+            Stmt::Expr(ExprStmt {
+                expr, semi: true, ..
+            }) => {
+                self.generate_expr(expr);
+                self.instr(Instruction::Discard(1));
             }
             Stmt::Assign(assign) => self.generate_assignment(assign),
             Stmt::Let(leet) => self.generate_local(leet),
             _ => todo!(),
+        }
+        false
+    }
+
+    fn generate_assignment(&mut self, assignment: stmt::Assignment) {
+        self.generate_expr(assignment.value);
+        match assignment.left {
+            Expr::Ident(ident) => {
+                if let Some(resolved) = self.scope.lookup(&ident) {
+                    self.instr(Instruction::Save(resolved));
+                } else {
+                    self.error(HirGenError::UnkownIdentifier(ident.span));
+                    self.instr(Instruction::Invalid { stack_delta: -1 });
+                }
+            }
+            expr => {
+                self.error(HirGenError::InvalidAssignmentTarget(expr.span()));
+                self.instr(Instruction::Invalid { stack_delta: -1 });
+            }
         }
     }
 
@@ -245,69 +289,66 @@ impl HirGen {
         });
         self.scope.locals.insert(name, index);
         self.generate_expr(leet.value);
-        self.current_basic_block
-            .push(Instruction::Save(Resolved::Local(leet.span, index)));
+        self.instr(Instruction::Save(Resolved::Local(leet.span, index)));
     }
 
-    fn generate_assignment(&mut self, assignment: stmt::Assignment) {
-        self.generate_expr(assignment.value);
-        match assignment.left {
-            Expr::Ident(ident) => {
-                if let Some(resolved) = self.scope.lookup(&ident) {
-                    self.current_basic_block.push(Instruction::Save(resolved));
-                } else {
-                    self.error(HirGenError::UnkownIdentifier(ident.span));
-                    self.current_basic_block
-                        .push(Instruction::Invalid { stack_change: -1 });
-                }
-            }
-            expr => self.error(HirGenError::InvalidAssignmentTarget(expr.span())),
-        }
-    }
-
+    /// Always pushes one value onto stack
     fn generate_expr(&mut self, expr: Expr) {
         match expr {
-            Expr::Literal(expr::Literal::Integer(i)) => self
-                .current_basic_block
-                .push(Instruction::IntegerLiteral(i)),
-            Expr::Literal(expr::Literal::Null(n)) => self
-                .current_basic_block
-                .push(Instruction::NullLiteral(n.span)),
-            Expr::Literal(expr::Literal::Str(s)) => {
-                self.current_basic_block.push(Instruction::StringLiteral(s))
-            }
+            Expr::Literal(expr::Literal::Integer(i)) => self.instr(Instruction::IntegerLiteral(i)),
+            Expr::Literal(expr::Literal::Null(n)) => self.instr(Instruction::NullLiteral(n.span)),
+            Expr::Literal(expr::Literal::Str(s)) => self.instr(Instruction::StringLiteral(s)),
+            Expr::Literal(expr::Literal::Bool(b)) => self.instr(Instruction::BoolLiteral(b)),
             Expr::Ident(ident) => self.generate_ident(ident),
             Expr::BinaryOperation(expr) => self.generate_binary_op_expr(expr),
             Expr::UnaryOperation(expr) => self.generate_unary_op_expr(expr),
             Expr::Call(call) => self.generate_call(call),
             Expr::If(eef) => self.generate_if(eef),
             Expr::Loop(looop) => self.generate_loop(looop),
-            Expr::Break(brake) => self.generate_break(brake),
+            Expr::Break(brejk) => self.generate_break(brejk),
+            Expr::Continue(continueue) => self.generate_continue(continueue),
+            Expr::Return(reeturn) => self.generate_return(reeturn),
             Expr::Block(block) => {
                 // TODO: generate_block should perhaps do more so that it actually generates a
                 // block fully, and not just part of it. But Because of `if`s and stuff it can't do
                 // the same every time.
-                let continue_at = self.next_basic_block_id();
                 let block_id = self.next_basic_block_id();
-                self.current_basic_block.push(Instruction::Jump(block_id));
+                let continue_at = self.next_basic_block_id();
+                self.instr(Instruction::Jump(block_id));
                 self.finish_basic_block();
                 self.current_basic_block.id = block_id;
                 self.generate_block(block, continue_at);
                 self.current_basic_block.id = continue_at;
             }
-            _ => todo!(),
         }
     }
 
+    /// Always pushes one value onto stack unless continue_at == self.current_basic_block.id
     fn generate_block(&mut self, block: expr::Block, continue_at: BasicBlockId) {
-        self.scope.push(Default::default());
-
-        for stmt in block.stmts.into_iter() {
-            self.generate_stmt(stmt);
+        if block.stmts.is_empty() {
+            self.instr(Instruction::NullLiteral(block.span));
+            self.instr(Instruction::Jump(continue_at));
+            self.finish_basic_block();
+            return;
         }
 
-        self.current_basic_block
-            .push(Instruction::Jump(continue_at));
+        self.scope.push(Default::default());
+
+        let last_index = block.stmts.len() - 1;
+        for (i, stmt) in block.stmts.into_iter().enumerate() {
+            let pushed_value = self.generate_stmt(stmt);
+            if i < last_index && pushed_value {
+                self.instr(Instruction::Discard(1));
+            }
+            if i == last_index && !pushed_value {
+                self.instr(Instruction::NullLiteral(block.span));
+            }
+        }
+
+        if self.current_basic_block.id == continue_at {
+            self.instr(Instruction::Discard(1));
+        }
+        self.instr(Instruction::Jump(continue_at));
 
         self.finish_basic_block();
 
@@ -316,21 +357,24 @@ impl HirGen {
 
     fn generate_if(&mut self, eef: expr::If) {
         self.generate_expr(*eef.condition);
-        let true_basic_block_id = self.next_basic_block_id();
-        let false_basic_block_id = self.next_basic_block_id();
-        self.current_basic_block.push(Instruction::Branch(
-            true_basic_block_id,
-            false_basic_block_id,
+        let then_basic_block_id = self.next_basic_block_id();
+        let else_basic_block_id = self.next_basic_block_id();
+        self.instr(Instruction::Branch(
+            then_basic_block_id,
+            else_basic_block_id,
         ));
-        let next_id = self.next_basic_block_id();
         self.finish_basic_block();
-        self.current_basic_block.id = true_basic_block_id;
+        let next_id = self.next_basic_block_id();
+        self.current_basic_block.id = then_basic_block_id;
+        let stack_height = self.curr_stack_height;
         self.generate_block(eef.then, next_id);
-        self.current_basic_block.id = false_basic_block_id;
+        self.curr_stack_height = stack_height;
+        self.current_basic_block.id = else_basic_block_id;
         if let Some(elze) = eef.elze {
             self.generate_block(elze, next_id);
         } else {
-            self.current_basic_block.push(Instruction::Jump(next_id));
+            self.instr(Instruction::NullLiteral(eef.span));
+            self.instr(Instruction::Jump(next_id));
             self.finish_basic_block();
         }
 
@@ -341,40 +385,75 @@ impl HirGen {
         let loop_basic_block_id = self.next_basic_block_id();
         let after_loop_basic_block_id = self.next_basic_block_id();
         self.scope.push(Scope {
-            break_destination: Some(after_loop_basic_block_id),
-            continue_destination: Some(loop_basic_block_id),
+            break_destination: Some((after_loop_basic_block_id, self.curr_stack_height)),
+            continue_destination: Some((loop_basic_block_id, self.curr_stack_height)),
             ..Default::default()
         });
-        self.current_basic_block
-            .push(Instruction::Jump(loop_basic_block_id));
+        self.instr(Instruction::Jump(loop_basic_block_id));
         self.finish_basic_block();
         self.current_basic_block.id = loop_basic_block_id;
         self.generate_block(looop.block, loop_basic_block_id);
         self.current_basic_block.id = after_loop_basic_block_id;
         self.scope.pop();
+
+        // `self.curr_stack_height` will have increased by one due to the loop block we generated.
+        // That's not why it will have actually increased though, but subtracting one and then
+        // adding one to `self.curr_stack_height` doesn't make that much sense either.
     }
 
-    fn generate_break(&mut self, brake: expr::Break) {
-        if let Some(dest) = self.scope.get_break_destination() {
-            if let Some(expr) = brake.value {
-                self.generate_expr(*expr);
+    fn generate_break(&mut self, brejk: expr::Break) {
+        if let Some((dest, height_at_dest)) = self.scope.get_break_destination() {
+            if self.curr_stack_height > height_at_dest {
+                self.instr(Instruction::Discard(
+                    (self.curr_stack_height - height_at_dest) as usize,
+                ));
             }
-            self.current_basic_block.push(Instruction::Jump(dest));
+            if let Some(expr) = brejk.value {
+                self.generate_expr(*expr);
+            } else {
+                self.instr(Instruction::NullLiteral(brejk.span));
+            }
+            self.instr(Instruction::Jump(dest));
         } else {
-            self.error(HirGenError::NoBreakDestination(brake.span));
+            self.instr(Instruction::Invalid { stack_delta: 1 });
+            self.error(HirGenError::NoBreakDestination(brejk.span));
         }
+    }
+
+    fn generate_continue(&mut self, continueue: expr::Continue) {
+        if let Some((dest, height_at_dest)) = self.scope.get_continue_destination() {
+            if self.curr_stack_height > height_at_dest {
+                self.instr(Instruction::Discard(
+                    (self.curr_stack_height - height_at_dest) as usize,
+                ));
+            }
+            self.instr(Instruction::Jump(dest));
+        } else {
+            self.instr(Instruction::Invalid { stack_delta: 1 });
+            self.error(HirGenError::NoContinueDestination(continueue.0));
+        }
+    }
+
+    fn generate_return(&mut self, reeturn: expr::Return) {
+        if self.curr_stack_height > 0 {
+            self.instr(Instruction::Discard(self.curr_stack_height as usize));
+        }
+        if let Some(expr) = reeturn.value {
+            self.generate_expr(*expr);
+        } else {
+            self.instr(Instruction::NullLiteral(reeturn.span));
+        }
+        self.instr(Instruction::Jump(self.return_basic_block_id));
     }
 
     fn generate_ident(&mut self, ident: Identifier) {
         if let Some(builtin) = Builtin::lookup(&ident) {
-            self.current_basic_block
-                .push(Instruction::Push(Resolved::Builtin(ident.span, builtin)));
+            self.instr(Instruction::Push(Resolved::Builtin(ident.span, builtin)));
         } else if let Some(resolved) = self.scope.lookup(&ident) {
-            self.current_basic_block.push(Instruction::Push(resolved));
+            self.instr(Instruction::Push(resolved));
         } else {
             self.error(HirGenError::UnkownIdentifier(ident.span));
-            self.current_basic_block
-                .push(Instruction::Invalid { stack_change: 1 });
+            self.instr(Instruction::Invalid { stack_delta: 1 });
         }
     }
 
@@ -385,8 +464,7 @@ impl HirGen {
         }
 
         self.generate_expr(*call.func);
-        self.current_basic_block
-            .push(Instruction::Call(call.span, params_len));
+        self.instr(Instruction::Call(call.span, params_len));
     }
 
     fn generate_binary_op_expr(&mut self, expr: expr::BinaryOperation) {
@@ -396,8 +474,7 @@ impl HirGen {
             span: expr.span,
             name: expr.op.to_string(),
         });
-        self.current_basic_block
-            .push(Instruction::Call(expr.span, 2));
+        self.instr(Instruction::Call(expr.span, 2));
     }
 
     fn generate_unary_op_expr(&mut self, expr: expr::UnaryOperation) {
@@ -406,8 +483,7 @@ impl HirGen {
             span: expr.span,
             name: expr.op.to_string(),
         });
-        self.current_basic_block
-            .push(Instruction::Call(expr.span, 1));
+        self.instr(Instruction::Call(expr.span, 1));
     }
 
     fn error(&mut self, err: HirGenError) {
@@ -431,6 +507,11 @@ impl HirGen {
         );
         self.generated_basic_blocks
             .insert(basic_block.id, basic_block);
+    }
+
+    fn instr(&mut self, instr: Instruction) {
+        self.curr_stack_height += instr.stack_delta();
+        self.current_basic_block.instructions.push(instr);
     }
 }
 

@@ -26,6 +26,7 @@ pub enum Expr {
     If(If),
     Loop(Loop),
     Break(Break),
+    Continue(Continue),
     Return(Return),
 }
 
@@ -55,6 +56,7 @@ impl Expr {
             | IfParser.map(Self::If)
             | LoopParser.map(Self::Loop)
             | BreakParser.map(Self::Break)
+            | ContinueParser.map(Self::Continue)
             | ReturnParser.map(Self::Return)
             | IdentifierParser.map(Self::Ident)
             | Literal::parser().map(Self::Literal)
@@ -70,6 +72,7 @@ impl Expr {
             Self::If(i) => i.span,
             Self::Loop(l) => l.span,
             Self::Break(b) => b.span,
+            Self::Continue(c) => c.0,
             Self::Return(r) => r.span,
         }
     }
@@ -100,7 +103,7 @@ impl Literal {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BoolLiteral {
     pub span: Span,
     pub value: bool,
@@ -169,7 +172,7 @@ impl fmt::Display for UnaryOperatorKind {
             "{}",
             match self {
                 Self::Neg => "-",
-                Self::Not => "!",
+                Self::Not => "not",
                 Self::Ref => "&",
                 Self::Deref => "*",
             }
@@ -418,6 +421,20 @@ impl Parser for BreakParser {
                 value,
             })
             .parse(input)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Continue(pub Span);
+
+#[derive(Debug, Clone, Copy)]
+pub struct ContinueParser;
+
+impl Parser for ContinueParser {
+    type Output = Continue;
+
+    fn parse(self, input: Input) -> Result<(Input, Self::Output), Error> {
+        StrParser("continue").map(Continue).parse(input)
     }
 }
 
