@@ -134,7 +134,7 @@ impl Parser for FunctionParser {
                     ident,
                     params,
                     return_type: return_type
-                        .unwrap_or(Type::Null(Span::new(body.span.start - 1..body.span.start))),
+                        .unwrap_or(Type::Void(Span::new(body.span.start - 1..body.span.start))),
                     body,
                 },
             )

@@ -15,6 +15,7 @@ pub enum HirGenError {
     InvalidTopLevelStatement(Span),
     InvalidAssignmentTarget(Span),
     UnkownIdentifier(Span),
+    NoBreakDestination(Span),
 }
 
 /// High-level IR
@@ -36,7 +37,7 @@ pub struct Function {
     pub params: Vec<(Identifier, Type)>,
     pub ret_type: Type,
     pub locals: Vec<Local>,
-    pub body: HashMap<BlockId, Block>,
+    pub body: HashMap<BasicBlockId, BasicBlock>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,13 +47,15 @@ pub struct Local {
     pub type_: Type,
 }
 
+// Last instruction must be something that moves execution elsewhere. Blocks are not ordered so
+// there must be no fall-through.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Block {
-    pub id: BlockId,
+pub struct BasicBlock {
+    pub id: BasicBlockId,
     pub instructions: Vec<Instruction>,
 }
 
-impl ops::Deref for Block {
+impl ops::Deref for BasicBlock {
     type Target = Vec<Instruction>;
 
     fn deref(&self) -> &Self::Target {
@@ -60,7 +63,11 @@ impl ops::Deref for Block {
     }
 }
 
-impl ops::DerefMut for Block {
+/// The block with id `BasicBlockId::default()` is always executed first
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct BasicBlockId(usize);
+
+impl ops::DerefMut for BasicBlock {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.instructions
     }
@@ -74,8 +81,9 @@ pub enum Instruction {
     Push(Resolved),
     Save(Resolved),
     Call(Span, usize),
-    Branch(BlockId, BlockId),
-    Jump(BlockId),
+    Branch(BasicBlockId, BasicBlockId),
+    Jump(BasicBlockId),
+    Return,
     Invalid { stack_change: isize },
 }
 
@@ -87,15 +95,12 @@ pub enum Resolved {
     Builtin(Span, Builtin),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct BlockId(usize);
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HirGen {
-    block_id_counter: BlockId,
-    generated_blocks: HashMap<BlockId, Block>,
+    basic_block_id_counter: BasicBlockId,
+    generated_basic_blocks: HashMap<BasicBlockId, BasicBlock>,
     current_locals: Vec<Local>,
-    current_block: Block,
+    current_basic_block: BasicBlock,
     errors: Vec<HirGenError>,
     scope: Box<Scope>,
 }
@@ -105,25 +110,56 @@ struct Scope {
     parameters: HashMap<String, usize>,
     locals: HashMap<String, usize>,
     globals: HashMap<String, usize>,
+    break_destination: Option<BasicBlockId>,
+    continue_destination: Option<BasicBlockId>,
     parent: Option<Box<Self>>,
 }
 
 impl Scope {
-    fn lookup(mut self: &Box<Self>, ident: &Identifier) -> Option<Resolved> {
-        loop {
-            if let Some(&local) = self.locals.get(&ident.name) {
-                break Some(Resolved::Local(ident.span, local));
-            } else if let Some(&param) = self.parameters.get(&ident.name) {
-                break Some(Resolved::Parameter(ident.span, param));
-            } else if let Some(&global) = self.globals.get(&ident.name) {
-                break Some(Resolved::Global(ident.span, global));
-            }
-            match self.parent {
-                Some(ref parent) => self = parent,
-                None => {
-                    return None;
-                }
-            }
+    fn pop(&mut self) {
+        let parent = mem::take(&mut self.parent);
+        *self = *parent.unwrap_or_default();
+    }
+
+    fn push(&mut self, child: Self) {
+        let scope = mem::take(self);
+        *self = Scope {
+            parent: Some(Box::new(scope)),
+            ..child
+        };
+    }
+
+    fn lookup(self: &Box<Self>, ident: &Identifier) -> Option<Resolved> {
+        if let Some(&local) = self.locals.get(&ident.name) {
+            Some(Resolved::Local(ident.span, local))
+        } else if let Some(&param) = self.parameters.get(&ident.name) {
+            Some(Resolved::Parameter(ident.span, param))
+        } else if let Some(&global) = self.globals.get(&ident.name) {
+            Some(Resolved::Global(ident.span, global))
+        } else if let Some(ref parent) = self.parent {
+            parent.lookup(ident)
+        } else {
+            None
+        }
+    }
+
+    fn get_break_destination(self: &Box<Self>) -> Option<BasicBlockId> {
+        if self.break_destination.is_some() {
+            self.break_destination
+        } else if let Some(ref parent) = self.parent {
+            parent.get_break_destination()
+        } else {
+            None
+        }
+    }
+
+    fn get_continue_destination(self: &Box<Self>) -> Option<BasicBlockId> {
+        if self.continue_destination.is_some() {
+            self.continue_destination
+        } else if let Some(ref parent) = self.parent {
+            parent.get_continue_destination()
+        } else {
+            None
         }
     }
 }
@@ -138,9 +174,9 @@ impl HirGen {
                 Stmt::Assign(ass) => self.error(HirGenError::InvalidTopLevelStatement(ass.span)),
                 Stmt::Function(f) => {
                     functions.push(self.generate_func(f));
-                    assert!(self.generated_blocks.is_empty());
+                    assert!(self.generated_basic_blocks.is_empty());
                     assert!(self.current_locals.is_empty());
-                    assert!(self.current_block.is_empty());
+                    assert!(self.current_basic_block.is_empty());
                 }
             }
         }
@@ -153,10 +189,8 @@ impl HirGen {
     }
 
     fn generate_func(&mut self, func: stmt::Function) -> Function {
-        if !self.generated_blocks.is_empty() {
-            todo!(
-                "Add support for generating function inside another function, perhaps by deferring"
-            );
+        if !self.generated_basic_blocks.is_empty() {
+            todo!("Already generating a function, wait until this is done before generating a new one");
         }
 
         let tmp = mem::take(&mut self.scope);
@@ -171,12 +205,13 @@ impl HirGen {
             ..Default::default()
         });
 
-        let end_block_id = self.next_block_id();
-        self.generate_block(func.body, end_block_id);
-        // TODO: maybe create a block with this id???
+        let end_basic_block_id = self.next_basic_block_id();
+        self.generate_block(func.body, end_basic_block_id);
+        self.current_basic_block.push(Instruction::Return);
+        self.finish_basic_block();
 
         let locals = mem::replace(&mut self.current_locals, vec![]);
-        let body = mem::replace(&mut self.generated_blocks, HashMap::new());
+        let body = mem::replace(&mut self.generated_basic_blocks, HashMap::new());
 
         Function {
             span: func.span,
@@ -186,22 +221,6 @@ impl HirGen {
             locals,
             body,
         }
-    }
-
-    fn generate_block(&mut self, block: expr::Block, continue_at: BlockId) {
-        let tmp = mem::take(&mut self.scope);
-        self.scope = Box::new(Scope {
-            parent: Some(tmp),
-            ..Default::default()
-        });
-
-        for stmt in block.stmts.into_iter() {
-            self.generate_stmt(stmt);
-        }
-
-        self.current_block.push(Instruction::Jump(continue_at));
-
-        self.finish_block();
     }
 
     fn generate_stmt(&mut self, stmt: Stmt) {
@@ -226,7 +245,7 @@ impl HirGen {
         });
         self.scope.locals.insert(name, index);
         self.generate_expr(leet.value);
-        self.current_block
+        self.current_basic_block
             .push(Instruction::Save(Resolved::Local(leet.span, index)));
     }
 
@@ -235,10 +254,10 @@ impl HirGen {
         match assignment.left {
             Expr::Ident(ident) => {
                 if let Some(resolved) = self.scope.lookup(&ident) {
-                    self.current_block.push(Instruction::Save(resolved));
+                    self.current_basic_block.push(Instruction::Save(resolved));
                 } else {
                     self.error(HirGenError::UnkownIdentifier(ident.span));
-                    self.current_block
+                    self.current_basic_block
                         .push(Instruction::Invalid { stack_change: -1 });
                 }
             }
@@ -248,85 +267,113 @@ impl HirGen {
 
     fn generate_expr(&mut self, expr: Expr) {
         match expr {
-            Expr::Literal(expr::Literal::Integer(i)) => {
-                self.current_block.push(Instruction::IntegerLiteral(i))
-            }
-            Expr::Literal(expr::Literal::Null(n)) => {
-                self.current_block.push(Instruction::NullLiteral(n.span))
-            }
+            Expr::Literal(expr::Literal::Integer(i)) => self
+                .current_basic_block
+                .push(Instruction::IntegerLiteral(i)),
+            Expr::Literal(expr::Literal::Null(n)) => self
+                .current_basic_block
+                .push(Instruction::NullLiteral(n.span)),
             Expr::Literal(expr::Literal::Str(s)) => {
-                self.current_block.push(Instruction::StringLiteral(s))
+                self.current_basic_block.push(Instruction::StringLiteral(s))
             }
             Expr::Ident(ident) => self.generate_ident(ident),
             Expr::BinaryOperation(expr) => self.generate_binary_op_expr(expr),
             Expr::UnaryOperation(expr) => self.generate_unary_op_expr(expr),
             Expr::Call(call) => self.generate_call(call),
             Expr::If(eef) => self.generate_if(eef),
+            Expr::Loop(looop) => self.generate_loop(looop),
+            Expr::Break(brake) => self.generate_break(brake),
             Expr::Block(block) => {
-                // TODO: I feel like I'm mixing up block and basic blocks here. Rename `hir::Block`
-                // to `BosicBlock`. `generate_block` is some awful mix between a block { ... } and a
-                // basic block
-                let block_id = self.next_block_id();
-                let next_id = self.next_block_id();
-                self.current_block.push(Instruction::Jump(block_id));
-                self.finish_block();
-                self.current_block.id = block_id;
-                self.generate_block(block, next_id);
-                self.current_block.id = next_id;
+                // TODO: generate_block should perhaps do more so that it actually generates a
+                // block fully, and not just part of it. But Because of `if`s and stuff it can't do
+                // the same every time.
+                let continue_at = self.next_basic_block_id();
+                let block_id = self.next_basic_block_id();
+                self.current_basic_block.push(Instruction::Jump(block_id));
+                self.finish_basic_block();
+                self.current_basic_block.id = block_id;
+                self.generate_block(block, continue_at);
+                self.current_basic_block.id = continue_at;
             }
             _ => todo!(),
         }
     }
 
-    /// block0:
-    ///     push param 420
-    ///
-    ///     push param 1
-    ///     push value "hej"
-    ///     binary eq
-    ///     jump_cond if_true_block if_false_block
-    ///
-    /// if_true_block:
-    ///     push value 69 000
-    ///     jump block1
-    ///
-    /// if_false_block:
-    ///     push value 0
-    ///     jump block1
-    ///
-    /// block1:
-    ///     binary plus
-    ///     push builtin print
-    ///     call 2
-    ///     ...
+    fn generate_block(&mut self, block: expr::Block, continue_at: BasicBlockId) {
+        self.scope.push(Default::default());
+
+        for stmt in block.stmts.into_iter() {
+            self.generate_stmt(stmt);
+        }
+
+        self.current_basic_block
+            .push(Instruction::Jump(continue_at));
+
+        self.finish_basic_block();
+
+        self.scope.pop();
+    }
 
     fn generate_if(&mut self, eef: expr::If) {
         self.generate_expr(*eef.condition);
-        let true_block_id = self.next_block_id();
-        let false_block_id = self.next_block_id();
-        self.current_block
-            .push(Instruction::Branch(true_block_id, false_block_id));
-        self.finish_block();
-        let next_id = self.next_block_id();
-        self.current_block.id = true_block_id;
+        let true_basic_block_id = self.next_basic_block_id();
+        let false_basic_block_id = self.next_basic_block_id();
+        self.current_basic_block.push(Instruction::Branch(
+            true_basic_block_id,
+            false_basic_block_id,
+        ));
+        let next_id = self.next_basic_block_id();
+        self.finish_basic_block();
+        self.current_basic_block.id = true_basic_block_id;
         self.generate_block(eef.then, next_id);
+        self.current_basic_block.id = false_basic_block_id;
         if let Some(elze) = eef.elze {
-            self.current_block.id = false_block_id;
             self.generate_block(elze, next_id);
+        } else {
+            self.current_basic_block.push(Instruction::Jump(next_id));
+            self.finish_basic_block();
         }
 
-        self.current_block.id = next_id;
+        self.current_basic_block.id = next_id;
+    }
+
+    fn generate_loop(&mut self, looop: expr::Loop) {
+        let loop_basic_block_id = self.next_basic_block_id();
+        let after_loop_basic_block_id = self.next_basic_block_id();
+        self.scope.push(Scope {
+            break_destination: Some(after_loop_basic_block_id),
+            continue_destination: Some(loop_basic_block_id),
+            ..Default::default()
+        });
+        self.current_basic_block
+            .push(Instruction::Jump(loop_basic_block_id));
+        self.finish_basic_block();
+        self.current_basic_block.id = loop_basic_block_id;
+        self.generate_block(looop.block, loop_basic_block_id);
+        self.current_basic_block.id = after_loop_basic_block_id;
+        self.scope.pop();
+    }
+
+    fn generate_break(&mut self, brake: expr::Break) {
+        if let Some(dest) = self.scope.get_break_destination() {
+            if let Some(expr) = brake.value {
+                self.generate_expr(*expr);
+            }
+            self.current_basic_block.push(Instruction::Jump(dest));
+        } else {
+            self.error(HirGenError::NoBreakDestination(brake.span));
+        }
     }
 
     fn generate_ident(&mut self, ident: Identifier) {
         if let Some(builtin) = Builtin::lookup(&ident) {
-            self.current_block
+            self.current_basic_block
                 .push(Instruction::Push(Resolved::Builtin(ident.span, builtin)));
         } else if let Some(resolved) = self.scope.lookup(&ident) {
-            self.current_block.push(Instruction::Push(resolved));
+            self.current_basic_block.push(Instruction::Push(resolved));
         } else {
             self.error(HirGenError::UnkownIdentifier(ident.span));
-            self.current_block
+            self.current_basic_block
                 .push(Instruction::Invalid { stack_change: 1 });
         }
     }
@@ -338,7 +385,7 @@ impl HirGen {
         }
 
         self.generate_expr(*call.func);
-        self.current_block
+        self.current_basic_block
             .push(Instruction::Call(call.span, params_len));
     }
 
@@ -349,7 +396,8 @@ impl HirGen {
             span: expr.span,
             name: expr.op.to_string(),
         });
-        self.current_block.push(Instruction::Call(expr.span, 2));
+        self.current_basic_block
+            .push(Instruction::Call(expr.span, 2));
     }
 
     fn generate_unary_op_expr(&mut self, expr: expr::UnaryOperation) {
@@ -358,29 +406,31 @@ impl HirGen {
             span: expr.span,
             name: expr.op.to_string(),
         });
-        self.current_block.push(Instruction::Call(expr.span, 1));
+        self.current_basic_block
+            .push(Instruction::Call(expr.span, 1));
     }
 
     fn error(&mut self, err: HirGenError) {
         self.errors.push(err);
     }
 
-    fn next_block_id(&mut self) -> BlockId {
-        self.block_id_counter = BlockId(self.block_id_counter.0 + 1);
-        self.block_id_counter
+    fn next_basic_block_id(&mut self) -> BasicBlockId {
+        self.basic_block_id_counter = BasicBlockId(self.basic_block_id_counter.0 + 1);
+        self.basic_block_id_counter
     }
 
-    /// Moves `self.current_block` into `self.generated_blocks`
-    fn finish_block(&mut self) {
-        let id = self.next_block_id();
-        let block = mem::replace(
-            &mut self.current_block,
-            Block {
+    /// Moves `self.current_basic_block` into `self.generated_blocks`
+    fn finish_basic_block(&mut self) {
+        let id = self.next_basic_block_id();
+        let basic_block = mem::replace(
+            &mut self.current_basic_block,
+            BasicBlock {
                 id,
                 instructions: vec![],
             },
         );
-        self.generated_blocks.insert(block.id, block);
+        self.generated_basic_blocks
+            .insert(basic_block.id, basic_block);
     }
 }
 

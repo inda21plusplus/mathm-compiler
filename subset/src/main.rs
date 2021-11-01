@@ -41,7 +41,7 @@ fn main() {
                             name: "main".into(),
                         },
                         params: vec![],
-                        return_type: Type::Null(Span::new(0..0)),
+                        return_type: Type::Void(Span::new(0..0)),
                         body: Block {
                             span: Span::new(0..0),
                             stmts: vec![output],

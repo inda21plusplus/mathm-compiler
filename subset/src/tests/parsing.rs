@@ -48,7 +48,7 @@ fn hello_world() {
         Stmt::Function(stmt::Function {
             ident: Identifier { name: main_str, .. },
             params: emptyvec0,
-            return_type: Type::Null(_),
+            return_type: Type::Void(_),
             body: Block { stmts, .. },
             ..
         }) if emptyvec0.len() == 0

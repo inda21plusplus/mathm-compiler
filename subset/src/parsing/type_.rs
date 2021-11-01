@@ -10,7 +10,7 @@ pub enum Type {
     Usize(Span),
     Bool(Span),
     String(Span),
-    Null(Span),
+    Void(Span),
     Reference(Reference),
 }
 
@@ -20,7 +20,7 @@ impl Type {
             Self::Usize(u) => u,
             Self::Bool(b) => b,
             Self::String(s) => s,
-            Self::Null(n) => n,
+            Self::Void(n) => n,
             Self::Reference(ref r) => r.span,
         }
     }
@@ -36,7 +36,8 @@ impl Parser for TypeParser {
         (StrParser("usize").map(Type::Usize).c()
             | StrParser("bool").map(Type::Bool)
             | StrParser("string").map(Type::String)
-            | StrParser("null").map(Type::Null)
+            | StrParser("void").map(Type::Void)
+            | StrParser("👻").map(Type::Void)
             | ReferenceParser.map(Type::Reference))
         .parse(input)
     }
