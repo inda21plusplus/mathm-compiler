@@ -1,7 +1,7 @@
 use parcom::Input;
 
 use crate::{
-    hir::{BasicBlockId, Hir, Instruction, Resolved},
+    hir::{BasicBlockId, Hir, Instruction, Resolved, Symbol},
     parsing::{number::IntegerLiteral, Module},
     Builtin,
 };
@@ -16,8 +16,11 @@ fn generate_hir() {
     let module = Module::parse(input).unwrap();
 
     let hir = Hir::generate(module).unwrap();
-    assert_eq!(hir.functions.len(), 1);
-    let f = &hir.functions[0];
+    assert_eq!(hir.symbols.len(), 1);
+    let f = match hir.symbols.into_iter().next().unwrap() {
+        Symbol::Function(f) => f,
+        other => panic!("{:?}", other),
+    };
     assert!(f.body.len() >= 1);
     let block = f.body.get(&BasicBlockId::default()).unwrap();
     assert_eq!(block.instructions.len(), 5, "{:#?}", block.instructions);
@@ -37,4 +40,25 @@ fn generate_hir() {
         Instruction::Call(_, 2) => (),
         other => panic!("{:#?}", other.clone()),
     }
+}
+
+#[test]
+fn recursion() {
+    let input = Input::new(
+        "
+        fn a() {
+            a()
+        }
+
+        fn b() {
+            c()
+        }
+
+        fn c() {
+            b()
+        }
+    ",
+    );
+    let ast = Module::parse(input).unwrap();
+    let _hir = Hir::generate(ast).unwrap();
 }
