@@ -180,6 +180,9 @@ impl HirGen {
             ..Default::default()
         });
 
+        self.basic_block_id_counter = BasicBlockId::default();
+        self.current_basic_block.id = BasicBlockId::default();
+
         self.return_basic_block_id = self.next_basic_block_id();
         self.generate_block(func.body, self.return_basic_block_id);
         self.current_basic_block.id = self.return_basic_block_id;
