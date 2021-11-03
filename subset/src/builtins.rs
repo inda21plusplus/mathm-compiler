@@ -4,17 +4,17 @@ use crate::parsing::Identifier;
 #[rustfmt::skip]
 pub enum Builtin {
     Not,
-    Ref,
     Plus, Minus, Asterisk, Slash, Percent,
     And, Or, Eq, Neq,
     Lt, Leq, Gt, Geq,
+
+    Print,
 }
 
 impl Builtin {
     pub fn lookup(ident: &Identifier) -> Option<Builtin> {
         match ident.name.as_ref() {
             "not" => Some(Self::Not),
-            "&" => Some(Self::Ref),
             "+" => Some(Self::Plus),
             "-" => Some(Self::Minus),
             "*" => Some(Self::Asterisk),
@@ -28,6 +28,7 @@ impl Builtin {
             "<=" => Some(Self::Leq),
             ">" => Some(Self::Gt),
             ">=" => Some(Self::Geq),
+            "print" => Some(Self::Print),
             _ => None,
         }
     }

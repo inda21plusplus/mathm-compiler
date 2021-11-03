@@ -8,7 +8,10 @@ pub mod parsing;
 #[cfg(test)]
 mod tests;
 
-use std::io::{stdin, stdout, Write};
+use std::{
+    env, fs,
+    io::{stdin, stdout, Read, Write},
+};
 
 pub use builtins::Builtin;
 pub use error::Error;
@@ -20,6 +23,28 @@ use crate::{
 };
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() == 1 {
+        repl();
+    } else {
+        for filename in args.iter().skip(1) {
+            let mut file =
+                fs::File::open(filename).expect(&format!("Could not open file {}", filename));
+            let mut contents = String::new();
+            file.read_to_string(&mut contents)
+                .expect(&format!("Could not read file {}", filename));
+            let input = Input::new(&contents);
+            let ast =
+                parsing::Module::parse(input).expect(&format!("Could not parse file {}", filename));
+            let hir =
+                hir::Hir::generate(ast).expect(&format!("Could not generate HIR for {}", filename));
+            let mut runner = hir::Runner::new(hir);
+            runner.run();
+        }
+    }
+}
+
+fn repl() {
     let mut lines = stdin().lines().flat_map(|line| line.ok());
     loop {
         print!("> ");
@@ -32,7 +57,6 @@ fn main() {
         let input = Input::new(&line);
         match parsing::Stmt::parser().parse(input) {
             Ok((Input { s: "", .. }, output)) => {
-                // println!("{:#?}", output);
                 let hir = Hir::generate(Module {
                     stmts: vec![parsing::Stmt::Function(parsing::stmt::Function {
                         span: output.span(),

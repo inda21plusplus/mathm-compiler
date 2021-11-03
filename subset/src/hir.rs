@@ -9,17 +9,21 @@ use crate::{
     Builtin,
 };
 
-mod hirgen;
+mod gen;
+mod run;
+
+pub use run::Runner;
 
 /// High-level IR. Stack based. Based.
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub symbols: Vec<Symbol>,
+    pub entypoint_index: Option<usize>,
 }
 
 impl Hir {
-    pub fn generate(module: Module) -> Result<Self, Vec<hirgen::HirGenError>> {
-        hirgen::HirGen::default().generate(module)
+    pub fn generate(module: Module) -> Result<Self, Vec<gen::HirGenError>> {
+        gen::HirGen::default().generate(module)
     }
 }
 
@@ -28,6 +32,21 @@ pub enum Symbol {
     Variable(Variable),
     Function(Function),
 }
+
+// impl Symbol {
+//     pub fn span(&self) -> Span {
+//         match *self {
+//             Self::Variable(Variable { span, .. }) => span,
+//             Self::Function(Function { span, .. }) => span,
+//         }
+//     }
+//     pub fn ident(&self) -> &Identifier {
+//         match self {
+//             Self::Variable(Variable { ident, .. }) => ident,
+//             Self::Function(Function { ident, .. }) => ident,
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone)]
 pub struct Variable {
@@ -74,8 +93,9 @@ pub enum Instruction {
     BoolLiteral(BoolLiteral),
     Push(Resolved),
     Save(Resolved),
+    PushReference(Resolved),
     Call(Span, usize),
-    Branch(BasicBlockId, BasicBlockId),
+    Branch(Span, BasicBlockId, BasicBlockId),
     Jump(BasicBlockId),
     Return,
     Discard(usize),
@@ -89,10 +109,11 @@ impl Instruction {
             | Self::NullLiteral(_)
             | Self::StringLiteral(_)
             | Self::BoolLiteral(_)
-            | Self::Push(_) => 1,
+            | Self::Push(_)
+            | Self::PushReference(_) => 1,
             Self::Save(_) => -1,
             Self::Call(_, params) => -(params as isize), // removes params, removes ident, pushes return value onto stack
-            Self::Branch(_, _) => -1,
+            Self::Branch(_, _, _) => -1,
             Self::Jump(_) | Self::Return => 0,
             Self::Invalid { stack_delta } => stack_delta,
             Self::Discard(amount) => -(amount as isize),

@@ -30,6 +30,7 @@ pub enum HirGenError {
     NoBreakDestination(Span),
     NoContinueDestination(Span),
     InvalidVariableInitialization(Span),
+    CannotTakeReferenceOf(Span),
 }
 
 type StackHeight = isize;
@@ -96,6 +97,7 @@ impl Scope {
 impl HirGen {
     pub(super) fn generate(mut self, module: Module) -> Result<Hir, Vec<HirGenError>> {
         let mut symbol_counter = 0;
+        let mut entypoint_index = None;
         for stmt in &module.stmts {
             match stmt {
                 Stmt::Let(stmt::Let { ident, .. })
@@ -103,6 +105,9 @@ impl HirGen {
                     self.scope
                         .symbols
                         .insert(ident.name.clone(), symbol_counter);
+                    if ident.name == "main" {
+                        entypoint_index = Some(symbol_counter);
+                    }
                     symbol_counter += 1;
                 }
                 _ => {}
@@ -129,7 +134,10 @@ impl HirGen {
         }
 
         if self.errors.is_empty() {
-            Ok(Hir { symbols })
+            Ok(Hir {
+                symbols,
+                entypoint_index,
+            })
         } else {
             Err(self.errors)
         }
@@ -308,10 +316,12 @@ impl HirGen {
     }
 
     fn generate_if(&mut self, eef: expr::If) {
+        let condition_span = eef.condition.span();
         self.generate_expr(*eef.condition);
         let then_basic_block_id = self.next_basic_block_id();
         let else_basic_block_id = self.next_basic_block_id();
         self.instr(Instruction::Branch(
+            condition_span,
             then_basic_block_id,
             else_basic_block_id,
         ));
@@ -430,12 +440,36 @@ impl HirGen {
     }
 
     fn generate_unary_op_expr(&mut self, expr: expr::UnaryOperation) {
+        if let expr::UnaryOperatorKind::Ref = expr.op {
+            self.generate_reference(*expr.expr);
+            return;
+        }
         self.generate_expr(*expr.expr);
         self.generate_ident(Identifier {
             span: expr.span,
             name: expr.op.to_string(),
         });
         self.instr(Instruction::Call(expr.span, 1));
+    }
+
+    fn generate_reference(&mut self, expr: Expr) {
+        match expr {
+            Expr::Ident(ident) => {
+                if let Some(builtin) = Builtin::lookup(&ident) {
+                    self.instr(Instruction::PushReference(Resolved::Builtin(
+                        ident.span, builtin,
+                    )));
+                } else if let Some(resolved) = self.scope.lookup(&ident) {
+                    self.instr(Instruction::PushReference(resolved));
+                } else {
+                    self.error(HirGenError::UnkownIdentifier(ident.span));
+                    self.instr(Instruction::Invalid { stack_delta: 1 });
+                }
+            }
+            _ => {
+                self.error(HirGenError::CannotTakeReferenceOf(expr.span()));
+            }
+        }
     }
 
     fn error(&mut self, err: HirGenError) {
