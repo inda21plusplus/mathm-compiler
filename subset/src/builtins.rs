@@ -24,10 +24,10 @@ impl Builtin {
             "or" => Some(Self::Or),
             "==" => Some(Self::Eq),
             "!=" => Some(Self::Neq),
-            "<" => Some(Self::Lt),
             "<=" => Some(Self::Leq),
-            ">" => Some(Self::Gt),
+            "<" => Some(Self::Lt),
             ">=" => Some(Self::Geq),
+            ">" => Some(Self::Gt),
             "print" => Some(Self::Print),
             _ => None,
         }

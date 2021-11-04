@@ -1,8 +1,10 @@
 fn main() {
-    print(fib(42), "\n");
+    let i usize = 0;
+    loop {
+        print(i, ": ", fib(i), "\n")
+        i = i + 1;
+    }
 }
-
-let inc usize = 1;
 
 fn fib(n usize) usize {
     let a usize = 0;
@@ -10,13 +12,13 @@ fn fib(n usize) usize {
 
     let i usize = 0;
     loop {
-        if i == n {
+        if i >= n {
             break a;
         }
         let c usize = a + b;
         a = b;
         b = c;
-        i = i + inc;
+        i = i + 1;
     }
 }
 

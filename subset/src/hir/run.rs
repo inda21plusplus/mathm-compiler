@@ -32,18 +32,6 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn is(&self, t: &parsing::Type) -> bool {
-        match t {
-            parsing::Type::Usize(_) => *self == Self::Usize,
-            parsing::Type::Bool(_) => *self == Self::Bool,
-            parsing::Type::String(_) => *self == Self::String,
-            parsing::Type::Void(_) => *self == Self::Void,
-            parsing::Type::Reference(r) => match self {
-                Self::Reference(to) => to.is(&r.to),
-                _ => false,
-            },
-        }
-    }
     pub fn new(t: &parsing::Type) -> Self {
         match t {
             parsing::Type::Usize(_) => Type::Usize,
@@ -198,7 +186,7 @@ impl Runner {
         let mut rip = 0;
         while rip < block!(symbol, block_id).instructions.len() {
             let instr = block!(symbol, block_id).instructions[rip].clone();
-            let res = self.run_instruction(symbol, instr);
+            let res = self.run_instruction(instr);
             if let BlockValue::Neither = res {
                 rip += 1;
             } else {
@@ -208,7 +196,7 @@ impl Runner {
         BlockValue::Neither
     }
 
-    fn run_instruction(&mut self, symbol: usize, instr: Instruction) -> BlockValue {
+    fn run_instruction(&mut self, instr: Instruction) -> BlockValue {
         // Learn this one simple trick to excel at Rust!
         // Borrow checker hates him!
         // 10/10 would check again!
@@ -256,41 +244,86 @@ impl Runner {
             Instruction::Push(Resolved::Builtin(_, builtin)) => {
                 push!(TypedValue(Type::Function, Value::Builtin(builtin)));
             }
-            Instruction::Save(Resolved::Local(_, i)) => {
-                frame!().locals[i] = pop!();
+            Instruction::Save(Resolved::Local(span, i)) => {
+                let value = pop!();
+                if frame!().locals[i].0 != value.0 {
+                    panic!(
+                        "Cannot assign to variable of type {:?} with value of type {:?} at {}",
+                        frame!().locals[i].0,
+                        value.0,
+                        span,
+                    );
+                }
+                frame!().locals[i] = value;
             }
             Instruction::Save(Resolved::Parameter(span, i)) => {
                 let value = pop!();
-                if !value.0.is(match &self.hir.symbols[symbol] {
-                    Symbol::Function(func) => &func.params[i].1,
-                    _ => unreachable!(),
-                }) {
-                    panic!("Incorrect types at {}", span);
+                if frame!().parameters[i].0 != value.0 {
+                    panic!(
+                        "Cannot assign to parameter of type {:?} with value of type {:?} at {}",
+                        frame!().parameters[i].0,
+                        value.0,
+                        span,
+                    );
                 }
                 frame!().parameters[i] = value;
             }
-            Instruction::Save(Resolved::Symbol(_, _i)) => {
-                todo!();
+            Instruction::Save(Resolved::Symbol(span, i)) => {
+                let value = pop!();
+                if self.symbols[i].0 != value.0 {
+                    panic!(
+                        "Cannot assign to global variable of type {:?} with value of type {:?} at {}",
+                        self.symbols[i].0, value.0, span,
+                    );
+                }
+                self.symbols[i] = value;
             }
             Instruction::Save(Resolved::Builtin(_, builtin)) => {
                 panic!("Cannot write to built in (function) {:?}", builtin);
             }
-            Instruction::PushReference(Resolved::Local(_, _index)) => {
-                todo!()
-                // let frame = self.frames.len() - 1;
-                // push!(TypedValue(
-                //     Type::Reference(),
-                //     Value::Reference(Reference::Local { frame, index })
-                // ));
+            Instruction::SaveReference(span) => {
+                let target = pop!();
+                let value = pop!();
+                let (target_type, target_ref) = match target {
+                    TypedValue(Type::Reference(to), Value::Reference(r)) => (to, r),
+                    other => panic!("Cannot dereference value of type {:?}", other),
+                };
+                if *target_type != value.0 {
+                    panic!(
+                        "Cannot assign to reference to type {:?} with value of type {:?} at {}",
+                        target_type, value.0, span,
+                    );
+                }
+                match target_ref {
+                    Reference::Local { frame, index } => self.frames[frame].locals[index] = value,
+                    Reference::Parameter { frame, index } => {
+                        self.frames[frame].parameters[index] = value
+                    }
+                    Reference::Symbol { index } => self.symbols[index] = value,
+                }
             }
-            Instruction::PushReference(Resolved::Parameter(_, _index)) => {
-                todo!()
-                // let frame = self.frames.len() - 1;
-                // push!(Value::Reference(Reference::Parameter { frame, index }));
+            Instruction::PushReference(Resolved::Local(_, index)) => {
+                let type_ = Box::new(frame!().locals[index].0.clone());
+                let frame = self.frames.len() - 1;
+                push!(TypedValue(
+                    Type::Reference(type_),
+                    Value::Reference(Reference::Local { frame, index })
+                ));
             }
-            Instruction::PushReference(Resolved::Symbol(_, _index)) => {
-                todo!()
-                // push!(Value::Reference(Reference::Symbol { index }));
+            Instruction::PushReference(Resolved::Parameter(_, index)) => {
+                let type_ = Box::new(frame!().parameters[index].0.clone());
+                let frame = self.frames.len() - 1;
+                push!(TypedValue(
+                    Type::Reference(type_),
+                    Value::Reference(Reference::Parameter { frame, index })
+                ));
+            }
+            Instruction::PushReference(Resolved::Symbol(_, index)) => {
+                let type_ = Box::new(self.symbols[index].0.clone());
+                push!(TypedValue(
+                    Type::Reference(type_),
+                    Value::Reference(Reference::Symbol { index })
+                ));
             }
             Instruction::PushReference(Resolved::Builtin(_, builtin)) => {
                 panic!("Cannot take reference to built in (function) {:?}", builtin);
@@ -343,7 +376,7 @@ impl Runner {
             Builtin::Not => run_builtin_not(params),
             Builtin::Plus => run_builtin_plus(params),
             Builtin::Minus => run_builtin_minus(params),
-            Builtin::Asterisk => run_builtin_asterisk(&self.frames),
+            Builtin::Asterisk => run_builtin_asterisk(&self.frames, &self.symbols),
             Builtin::Slash => run_builtin_slash(params),
             Builtin::Percent => run_builtin_percent(params),
             Builtin::And => run_builtin_and(params),
@@ -384,7 +417,7 @@ fn run_builtin_minus(params: &[TypedValue]) -> TypedValue {
     }
 }
 
-fn run_builtin_asterisk(frames: &[Frame]) -> TypedValue {
+fn run_builtin_asterisk(frames: &[Frame], symbols: &[TypedValue]) -> TypedValue {
     match &frames.last().unwrap().parameters[..] {
         [TypedValue(_, Value::Usize(a)), TypedValue(_, Value::Usize(b))] => {
             TypedValue(Type::Usize, Value::Usize(a * b))
@@ -395,9 +428,7 @@ fn run_builtin_asterisk(frames: &[Frame]) -> TypedValue {
         [TypedValue(_, Value::Reference(Reference::Parameter { frame, index }))] => {
             frames[*frame].parameters[*index].clone()
         }
-        [TypedValue(_, Value::Reference(Reference::Symbol { index: _ }))] => {
-            todo!()
-        }
+        [TypedValue(_, Value::Reference(Reference::Symbol { index }))] => symbols[*index].clone(),
         _ => panic!(
             "Invalid arguments {:?} for *",
             &frames.last().unwrap().parameters[..]
@@ -457,7 +488,7 @@ fn run_builtin_neq(params: &[TypedValue]) -> TypedValue {
 
 fn run_builtin_lt(params: &[TypedValue]) -> TypedValue {
     match params {
-        [TypedValue(_, Value::Usize(a)), TypedValue(_, Value::Usize(b))] => {
+        [TypedValue(_, Value::Usize(b)), TypedValue(_, Value::Usize(a))] => {
             TypedValue(Type::Bool, Value::Bool(*a < *b))
         }
         _ => panic!("Invalid arguments {:?} for <", params),
@@ -465,7 +496,7 @@ fn run_builtin_lt(params: &[TypedValue]) -> TypedValue {
 }
 fn run_builtin_leq(params: &[TypedValue]) -> TypedValue {
     match params {
-        [TypedValue(_, Value::Usize(a)), TypedValue(_, Value::Usize(b))] => {
+        [TypedValue(_, Value::Usize(b)), TypedValue(_, Value::Usize(a))] => {
             TypedValue(Type::Bool, Value::Bool(*a <= *b))
         }
         _ => panic!("Invalid arguments {:?} for <=", params),
@@ -473,7 +504,7 @@ fn run_builtin_leq(params: &[TypedValue]) -> TypedValue {
 }
 fn run_builtin_gt(params: &[TypedValue]) -> TypedValue {
     match params {
-        [TypedValue(_, Value::Usize(a)), TypedValue(_, Value::Usize(b))] => {
+        [TypedValue(_, Value::Usize(b)), TypedValue(_, Value::Usize(a))] => {
             TypedValue(Type::Bool, Value::Bool(*a > *b))
         }
         _ => panic!("Invalid arguments {:?} for >", params),
@@ -481,7 +512,7 @@ fn run_builtin_gt(params: &[TypedValue]) -> TypedValue {
 }
 fn run_builtin_geq(params: &[TypedValue]) -> TypedValue {
     match params {
-        [TypedValue(_, Value::Usize(a)), TypedValue(_, Value::Usize(b))] => {
+        [TypedValue(_, Value::Usize(b)), TypedValue(_, Value::Usize(a))] => {
             TypedValue(Type::Bool, Value::Bool(*a >= *b))
         }
         _ => panic!("Invalid arguments {:?} for >=", params),

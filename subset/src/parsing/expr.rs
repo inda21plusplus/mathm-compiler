@@ -207,10 +207,10 @@ impl BinaryOperatorKind {
             | StrParser("or").map(|_| Self::Or)
             | StrParser("==").map(|_| Self::Eq)
             | StrParser("!=").map(|_| Self::Neq)
-            | CharParser('<').map(|_| Self::Lt)
             | StrParser("<=").map(|_| Self::Leq)
-            | CharParser('>').map(|_| Self::Gt)
+            | CharParser('<').map(|_| Self::Lt)
             | StrParser(">=").map(|_| Self::Geq)
+            | CharParser('>').map(|_| Self::Gt)
     }
     fn precedence_level(&self) -> usize {
         use BinaryOperatorKind::*;

@@ -235,6 +235,14 @@ impl HirGen {
                     self.instr(Instruction::Invalid { stack_delta: -1 });
                 }
             }
+            Expr::UnaryOperation(expr::UnaryOperation {
+                span,
+                op: expr::UnaryOperatorKind::Deref,
+                expr,
+            }) => {
+                self.generate_expr(*expr);
+                self.instr(Instruction::SaveReference(span));
+            }
             expr => {
                 self.error(HirGenError::InvalidAssignmentTarget(expr.span()));
                 self.instr(Instruction::Invalid { stack_delta: -1 });

@@ -94,6 +94,7 @@ pub enum Instruction {
     Push(Resolved),
     Save(Resolved),
     PushReference(Resolved),
+    SaveReference(Span),
     Call(Span, usize),
     Branch(Span, BasicBlockId, BasicBlockId),
     Jump(BasicBlockId),
@@ -112,6 +113,7 @@ impl Instruction {
             | Self::Push(_)
             | Self::PushReference(_) => 1,
             Self::Save(_) => -1,
+            Self::SaveReference(_) => -2,
             Self::Call(_, params) => -(params as isize), // removes params, removes ident, pushes return value onto stack
             Self::Branch(_, _, _) => -1,
             Self::Jump(_) | Self::Return => 0,

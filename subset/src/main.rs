@@ -1,6 +1,7 @@
 #![feature(stdin_forwarders, box_patterns)]
 
 mod builtins;
+mod codegen;
 mod error;
 mod hir;
 pub mod parsing;
@@ -23,6 +24,10 @@ use crate::{
 };
 
 fn main() {
+    if false {
+        codegen::run();
+        return;
+    }
     let args: Vec<String> = env::args().collect();
     if args.len() == 1 {
         repl();
