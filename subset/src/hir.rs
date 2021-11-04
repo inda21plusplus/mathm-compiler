@@ -33,20 +33,20 @@ pub enum Symbol {
     Function(Function),
 }
 
-// impl Symbol {
-//     pub fn span(&self) -> Span {
-//         match *self {
-//             Self::Variable(Variable { span, .. }) => span,
-//             Self::Function(Function { span, .. }) => span,
-//         }
-//     }
-//     pub fn ident(&self) -> &Identifier {
-//         match self {
-//             Self::Variable(Variable { ident, .. }) => ident,
-//             Self::Function(Function { ident, .. }) => ident,
-//         }
-//     }
-// }
+impl Symbol {
+    // pub fn span(&self) -> Span {
+    //     match *self {
+    //         Self::Variable(Variable { span, .. }) => span,
+    //         Self::Function(Function { span, .. }) => span,
+    //     }
+    // }
+    pub fn ident(&self) -> &Identifier {
+        match self {
+            Self::Variable(Variable { ident, .. }) => ident,
+            Self::Function(Function { ident, .. }) => ident,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Variable {

@@ -2,6 +2,8 @@ fn main() {
     print(fib(42), "\n");
 }
 
+let inc usize = 1;
+
 fn fib(n usize) usize {
     let a usize = 0;
     let b usize = 1;
@@ -14,7 +16,7 @@ fn fib(n usize) usize {
         let c usize = a + b;
         a = b;
         b = c;
-        i = i + 1;
+        i = i + inc;
     }
 }
 
